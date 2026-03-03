@@ -1246,7 +1246,7 @@ export namespace Config {
         for (let i = 0; i < data.plugin.length; i++) {
           const plugin = data.plugin[i]
           try {
-            data.plugin[i] = import.meta.resolve!(plugin, options.path)
+            data.plugin[i] = (import.meta.resolve as Function)(plugin, options.path) as string
           } catch (e) {
             try {
               // import.meta.resolve sometimes fails with newly created node_modules

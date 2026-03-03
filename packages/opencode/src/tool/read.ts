@@ -135,7 +135,7 @@ export const ReadTool = Tool.define("read", {
           {
             type: "file",
             mime,
-            url: `data:${mime};base64,${Buffer.from(await Filesystem.readBytes(filepath)).toString("base64")}`,
+            url: `data:${mime};base64,${(await Filesystem.readBytes(filepath)).toString("base64")}`,
           },
         ],
       }
@@ -274,7 +274,7 @@ async function isBinaryFile(filepath: string, fileSize: number): Promise<boolean
   const fh = await fs.open(filepath, "r")
   try {
     const sampleSize = Math.min(4096, fileSize)
-    const bytes = Buffer.alloc(sampleSize)
+    const bytes = new Uint8Array(sampleSize)
     const result = await fh.read(bytes, 0, sampleSize, 0)
     if (result.bytesRead === 0) return false
 

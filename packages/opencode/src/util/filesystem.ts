@@ -52,19 +52,20 @@ export namespace Filesystem {
   }
 
   export async function write(p: string, content: string | Buffer | Uint8Array, mode?: number): Promise<void> {
+    const data = typeof content === "string" ? content : (content as Uint8Array)
     try {
       if (mode) {
-        await writeFile(p, content, { mode })
+        await writeFile(p, data, { mode })
       } else {
-        await writeFile(p, content)
+        await writeFile(p, data)
       }
     } catch (e) {
       if (isEnoent(e)) {
         await mkdir(dirname(p), { recursive: true })
         if (mode) {
-          await writeFile(p, content, { mode })
+          await writeFile(p, data, { mode })
         } else {
-          await writeFile(p, content)
+          await writeFile(p, data)
         }
         return
       }

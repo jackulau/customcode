@@ -86,7 +86,7 @@ describe("file/index Filesystem patterns", () => {
       await using tmp = await tmpdir()
       const filepath = path.join(tmp.path, "image.png")
       const binaryContent = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
-      await fs.writeFile(filepath, binaryContent)
+      await fs.writeFile(filepath, new Uint8Array(binaryContent))
 
       await Instance.provide({
         directory: tmp.path,
@@ -103,7 +103,7 @@ describe("file/index Filesystem patterns", () => {
     test("returns empty for binary non-image files", async () => {
       await using tmp = await tmpdir()
       const filepath = path.join(tmp.path, "binary.so")
-      await fs.writeFile(filepath, Buffer.from([0x7f, 0x45, 0x4c, 0x46]), "binary")
+      await fs.writeFile(filepath, new Uint8Array([0x7f, 0x45, 0x4c, 0x46]))
 
       await Instance.provide({
         directory: tmp.path,
@@ -144,7 +144,7 @@ describe("file/index Filesystem patterns", () => {
 
       for (const { ext, mime } of testCases) {
         const filepath = path.join(tmp.path, `test.${ext}`)
-        await fs.writeFile(filepath, Buffer.from([0x00, 0x00, 0x00, 0x00]), "binary")
+        await fs.writeFile(filepath, new Uint8Array([0x00, 0x00, 0x00, 0x00]))
 
         await Instance.provide({
           directory: tmp.path,
@@ -355,7 +355,7 @@ describe("file/index Filesystem patterns", () => {
     test("returns base64 encoding for images", async () => {
       await using tmp = await tmpdir()
       const filepath = path.join(tmp.path, "test.jpg")
-      await fs.writeFile(filepath, Buffer.from([0xff, 0xd8, 0xff, 0xe0]), "binary")
+      await fs.writeFile(filepath, new Uint8Array([0xff, 0xd8, 0xff, 0xe0]))
 
       await Instance.provide({
         directory: tmp.path,
