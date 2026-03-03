@@ -69,10 +69,6 @@ export const TuiThreadCommand = cmd({
         type: "string",
         describe: "session id to continue",
       })
-      .option("fork", {
-        type: "boolean",
-        describe: "fork the session when continuing (use with --continue or --session)",
-      })
       .option("prompt", {
         type: "string",
         describe: "prompt to use",
@@ -89,12 +85,6 @@ export const TuiThreadCommand = cmd({
       // Must be the very first thing — disables CTRL_C_EVENT before any Worker
       // spawn or async work so the OS cannot kill the process group.
       win32DisableProcessedInput()
-
-      if (args.fork && !args.continue && !args.session) {
-        UI.error("--fork requires --continue or --session")
-        process.exitCode = 1
-        return
-      }
 
       // Resolve relative paths against PWD to preserve behavior when using --cwd flag
       const baseCwd = process.env.PWD ?? process.cwd()
@@ -179,7 +169,6 @@ export const TuiThreadCommand = cmd({
           agent: args.agent,
           model: args.model,
           prompt,
-          fork: args.fork,
         },
         onExit: async () => {
           await client.call("shutdown", undefined)

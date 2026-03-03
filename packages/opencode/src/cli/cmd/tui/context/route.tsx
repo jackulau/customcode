@@ -2,9 +2,9 @@ import { createStore } from "solid-js/store"
 import { createSimpleContext } from "./helper"
 import type { PromptInfo } from "../component/prompt/history"
 
-export type HomeRoute = {
+/** Initial loading state before auto-continue navigates to a session. */
+export type LoadingRoute = {
   type: "home"
-  initialPrompt?: PromptInfo
 }
 
 export type SessionRoute = {
@@ -13,7 +13,7 @@ export type SessionRoute = {
   initialPrompt?: PromptInfo
 }
 
-export type Route = HomeRoute | SessionRoute
+export type Route = LoadingRoute | SessionRoute
 
 export const { use: useRoute, provider: RouteProvider } = createSimpleContext({
   name: "Route",

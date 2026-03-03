@@ -202,7 +202,7 @@ export function Session() {
   const toast = useToast()
   const sdk = useSDK()
 
-  // Handle initial prompt from fork
+  // Handle initial prompt
   createEffect(() => {
     if (route.initialPrompt && prompt) {
       prompt.set(route.initialPrompt)

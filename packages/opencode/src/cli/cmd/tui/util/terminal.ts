@@ -1,4 +1,50 @@
 import { RGBA } from "@opentui/core"
+import { existsSync, statSync, writeFileSync, unlinkSync } from "fs"
+import { tmpdir } from "os"
+import path from "path"
+
+const LOCK_STALE_MS = 5000
+const QUERY_TIMEOUT_MS = 500
+
+/**
+ * Acquire a short-lived lock file scoped to the parent process (terminal session).
+ * Returns a release function, or null if another instance already holds the lock.
+ */
+function acquireTerminalQueryLock(): (() => void) | null {
+  // Use ppid to scope to the terminal session — instances in the same terminal
+  // share the same parent shell process.
+  const lockPath = path.join(tmpdir(), `opencode-terminal-query-${process.ppid}.lock`)
+
+  try {
+    if (existsSync(lockPath)) {
+      const stat = statSync(lockPath)
+      const age = Date.now() - stat.mtimeMs
+      if (age < LOCK_STALE_MS) {
+        // Another instance is currently querying — skip to avoid race
+        return null
+      }
+      // Lock is stale, clean it up
+      try {
+        unlinkSync(lockPath)
+      } catch {
+        // Ignore — another process may have already cleaned it
+      }
+    }
+
+    writeFileSync(lockPath, String(process.pid), { flag: "wx" })
+  } catch {
+    // Could not create lock (another instance beat us) — skip query
+    return null
+  }
+
+  return () => {
+    try {
+      unlinkSync(lockPath)
+    } catch {
+      // Ignore cleanup errors
+    }
+  }
+}
 
 export namespace Terminal {
   export type Colors = Awaited<ReturnType<typeof colors>>
@@ -8,6 +54,9 @@ export namespace Terminal {
    *
    * Note: OSC 4 (palette) queries may not work through tmux as responses are filtered.
    * OSC 10/11 (foreground/background) typically work in most environments.
+   *
+   * Uses a PID-scoped lock file to prevent multiple OpenCode instances from
+   * querying the terminal simultaneously, which can cause response cross-talk.
    *
    * Returns an object with background, foreground, and colors array.
    * Any query that fails will be null/empty.
@@ -19,6 +68,12 @@ export namespace Terminal {
   }> {
     if (!process.stdin.isTTY) return { background: null, foreground: null, colors: [] }
 
+    const releaseLock = acquireTerminalQueryLock()
+    if (!releaseLock) {
+      // Another instance is querying — return defaults to avoid cross-talk
+      return { background: null, foreground: null, colors: [] }
+    }
+
     return new Promise((resolve) => {
       let background: RGBA | null = null
       let foreground: RGBA | null = null
@@ -29,6 +84,7 @@ export namespace Terminal {
         process.stdin.setRawMode(false)
         process.stdin.removeListener("data", handler)
         clearTimeout(timeout)
+        releaseLock()
       }
 
       const parseColor = (colorStr: string): RGBA | null => {
@@ -96,7 +152,7 @@ export namespace Terminal {
       timeout = setTimeout(() => {
         cleanup()
         resolve({ background, foreground, colors: paletteColors })
-      }, 1000)
+      }, QUERY_TIMEOUT_MS)
     })
   }
 
