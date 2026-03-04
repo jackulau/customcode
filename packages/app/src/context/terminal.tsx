@@ -322,13 +322,28 @@ export const { use: useTerminal, provider: TerminalProvider } = createSimpleCont
 
     const workspace = createMemo(() => loadWorkspace(params.dir!, params.id))
 
+    const findWorkspaceForPty = (ptyId: string): TerminalSession | undefined => {
+      for (const entry of cache.values()) {
+        if (entry.value.all().some((x) => x.id === ptyId)) {
+          return entry.value
+        }
+      }
+      return undefined
+    }
+
     return {
       ready: () => workspace().ready(),
       all: () => workspace().all(),
       active: () => workspace().active(),
       new: () => workspace().new(),
-      update: (pty: Partial<LocalPTY> & { id: string }) => workspace().update(pty),
-      clone: (id: string) => workspace().clone(id),
+      update: (pty: Partial<LocalPTY> & { id: string }) => {
+        const target = findWorkspaceForPty(pty.id) ?? workspace()
+        target.update(pty)
+      },
+      clone: (id: string) => {
+        const target = findWorkspaceForPty(id) ?? workspace()
+        return target.clone(id)
+      },
       open: (id: string) => workspace().open(id),
       close: (id: string) => workspace().close(id),
       move: (id: string, to: number) => workspace().move(id, to),

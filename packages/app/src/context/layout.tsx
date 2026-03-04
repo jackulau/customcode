@@ -182,6 +182,13 @@ export const { use: useLayout, provider: LayoutProvider } = createSimpleContext(
       })()
 
       const sessionTabs = value.sessionTabs
+      const terminal = value.terminal
+      const migratedTerminal = (() => {
+        if (!isRecord(terminal)) return terminal
+        if (terminal.opened === true) return terminal
+        return { ...terminal, opened: true }
+      })()
+
       const migratedSessionTabs = (() => {
         if (!isRecord(sessionTabs)) return sessionTabs
 
@@ -210,6 +217,7 @@ export const { use: useLayout, provider: LayoutProvider } = createSimpleContext(
         migratedSidebar === sidebar &&
         migratedReview === review &&
         migratedFileTree === fileTree &&
+        migratedTerminal === terminal &&
         migratedSessionTabs === sessionTabs
       ) {
         return value
@@ -220,6 +228,7 @@ export const { use: useLayout, provider: LayoutProvider } = createSimpleContext(
         sidebar: migratedSidebar,
         review: migratedReview,
         fileTree: migratedFileTree,
+        terminal: migratedTerminal,
         sessionTabs: migratedSessionTabs,
       }
     }
@@ -236,7 +245,7 @@ export const { use: useLayout, provider: LayoutProvider } = createSimpleContext(
         },
         terminal: {
           height: DEFAULT_TERMINAL_HEIGHT,
-          opened: false,
+          opened: true,
         },
         review: {
           diffStyle: "split" as ReviewDiffStyle,
@@ -734,7 +743,7 @@ export const { use: useLayout, provider: LayoutProvider } = createSimpleContext(
       view(sessionKey: string | Accessor<string>) {
         const key = createSessionKeyReader(sessionKey, ensureKey)
         const s = createMemo(() => store.sessionView[key()] ?? { scroll: {} })
-        const terminalOpened = createMemo(() => store.terminal?.opened ?? false)
+        const terminalOpened = createMemo(() => store.terminal?.opened ?? true)
         const reviewPanelOpened = createMemo(() => store.review?.panelOpened ?? true)
 
         function setTerminalOpened(next: boolean) {

@@ -19,6 +19,7 @@ import { useTerminal, type LocalPTY } from "@/context/terminal"
 import { terminalTabLabel } from "@/pages/session/terminal-label"
 import { focusTerminalById } from "@/pages/session/helpers"
 import { getTerminalHandoff, setTerminalHandoff } from "@/pages/session/handoff"
+import { useTheme } from "@opencode-ai/ui/theme"
 
 export function TerminalPanel(props: { onSubmit?: () => void }) {
   const params = useParams()
@@ -26,6 +27,7 @@ export function TerminalPanel(props: { onSubmit?: () => void }) {
   const terminal = useTerminal()
   const language = useLanguage()
   const command = useCommand()
+  const theme = useTheme()
 
   const isDesktop = createMediaQuery("(min-width: 768px)")
   const sessionKey = createMemo(() => `${params.dir}${params.id ? "/" + params.id : ""}`)
@@ -172,13 +174,11 @@ export function TerminalPanel(props: { onSubmit?: () => void }) {
                     </div>
                   )}
                 </For>
-                <div class="flex-1" />
-                <div class="text-text-weak pr-2">
-                  {language.t("common.loading")}
-                  {language.t("common.loading.ellipsis")}
-                </div>
               </div>
-              <div class="flex-1 flex items-center justify-center text-text-weak">{language.t("terminal.loading")}</div>
+              <div
+                class="flex-1"
+                style={{ "background-color": theme.mode() === "dark" ? "#191515" : "#fcfcfc" }}
+              />
             </div>
           }
         >
@@ -219,17 +219,22 @@ export function TerminalPanel(props: { onSubmit?: () => void }) {
                 </Tabs.List>
               </Tabs>
               <div class="flex-1 min-h-0 relative overflow-hidden" style={{ contain: "paint" }}>
-                <Show when={terminal.active()} keyed>
-                  {(id) => (
-                    <Show when={byId().get(id)}>
-                      {(pty) => (
-                        <div id={`terminal-wrapper-${id}`} class="absolute inset-0">
-                          <Terminal pty={pty()} onSubmit={props.onSubmit} onCleanup={terminal.update} onConnectError={() => terminal.clone(id)} />
-                        </div>
-                      )}
-                    </Show>
+                <For each={all()}>
+                  {(pty) => (
+                    <div
+                      id={`terminal-wrapper-${pty.id}`}
+                      class="absolute inset-0"
+                      style={{ visibility: terminal.active() === pty.id ? "visible" : "hidden" }}
+                    >
+                      <Terminal
+                        pty={pty}
+                        onSubmit={props.onSubmit}
+                        onCleanup={terminal.update}
+                        onConnectError={() => terminal.clone(pty.id)}
+                      />
+                    </div>
                   )}
-                </Show>
+                </For>
               </div>
             </div>
             <DragOverlay>

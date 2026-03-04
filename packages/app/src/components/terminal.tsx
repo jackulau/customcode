@@ -117,8 +117,10 @@ const useTerminalUiBindings = (input: {
         input.onImagePaste(file)
         return
       }
-      // No native image — fall through to text paste
-      if (text) {
+      // No native image — fall through to text paste only if there's real text content.
+      // When pasting images, WKWebView may expose garbage text (em dashes, etc.) so
+      // only paste if the text looks like actual content (not a single special character).
+      if (text && text.length > 1) {
         input.term.paste(text)
       }
       return
@@ -559,7 +561,7 @@ export const Terminal = (props: TerminalProps) => {
               if (socket.readyState === WebSocket.OPEN) {
                 socket.send(cmd + "\n")
               }
-            }, 300)
+            }, 50)
           }
         }
       }
@@ -677,7 +679,7 @@ export const Terminal = (props: TerminalProps) => {
     }
 
     output.flush(finalize)
-    setTimeout(finalize, 500)
+    setTimeout(finalize, 100)
   })
 
   return (

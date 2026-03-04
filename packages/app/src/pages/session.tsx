@@ -20,6 +20,7 @@ import { createOpenReviewFile } from "@/pages/session/helpers"
 import { SessionReviewTab, type DiffStyle, type SessionReviewTabProps } from "@/pages/session/review-tab"
 import { TerminalPanel } from "@/pages/session/terminal-panel"
 import { SessionSidePanel } from "@/pages/session/session-side-panel"
+import { useSessionCommands } from "@/pages/session/use-session-commands"
 
 export default function Page() {
   const layout = useLayout()
@@ -150,7 +151,10 @@ export default function Page() {
     changes: "working" as "working" | "session" | "turn",
   })
 
-  const turnDiffs = createMemo(() => lastUserMessage()?.summary?.diffs ?? [])
+  const turnDiffs = createMemo(() => {
+    const d = lastUserMessage()?.summary?.diffs
+    return Array.isArray(d) ? d : []
+  })
   const reviewDiffs = createMemo(() => {
     if (store.changes === "working") return workingDiffs()
     if (store.changes === "turn") return turnDiffs()
@@ -279,6 +283,12 @@ export default function Page() {
     if (fileTreeTab() !== "changes") return
     setFileTreeTab("all")
   }
+
+  useSessionCommands({
+    navigateMessageByOffset: () => {},
+    setActiveMessage: () => {},
+    focusInput: () => {},
+  })
 
   const openReviewFile = createOpenReviewFile({
     showAllFiles,
@@ -604,7 +614,7 @@ export default function Page() {
       <div class="flex-1 min-h-0 flex">
         <SessionSidePanel reviewPanel={reviewPanel} activeDiff={tree.activeDiff} focusReviewDiff={focusReviewDiff} />
       </div>
-      <TerminalPanel onSubmit={() => sync.workingDiff.schedule(2000)} />
+      <TerminalPanel onSubmit={() => sync.workingDiff.schedule(500)} />
     </div>
   )
 }

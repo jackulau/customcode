@@ -144,8 +144,9 @@ export const SessionReview = (props: SessionReviewProps) => {
   const anchors = new Map<string, HTMLElement>()
   const searchHandles = new Map<string, FileSearchHandle>()
   const readyFiles = new Set<string>()
+  const safeDiffs = () => (Array.isArray(props.diffs) ? props.diffs : [])
   const [store, setStore] = createStore<{ open: string[]; force: Record<string, boolean> }>({
-    open: props.diffs.length > 10 ? [] : props.diffs.map((d) => d.file),
+    open: safeDiffs().length > 10 ? [] : safeDiffs().map((d) => d.file),
     force: {},
   })
 
@@ -159,8 +160,8 @@ export const SessionReview = (props: SessionReviewProps) => {
 
   const open = () => props.open ?? store.open
   const openSet = createMemo(() => new Set(open()))
-  const files = createMemo(() => props.diffs.map((d) => d.file))
-  const diffs = createMemo(() => new Map(props.diffs.map((d) => [d.file, d] as const)))
+  const files = createMemo(() => safeDiffs().map((d) => d.file))
+  const diffs = createMemo(() => new Map(safeDiffs().map((d) => [d.file, d] as const)))
   const diffStyle = () => props.diffStyle ?? (props.split ? "split" : "unified")
   const hasDiffs = () => files().length > 0
   const searchValue = createMemo(() => searchQuery().trim())
@@ -224,7 +225,7 @@ export const SessionReview = (props: SessionReviewProps) => {
   const searchHits = createMemo(() =>
     buildSessionSearchHits({
       query: searchQuery(),
-      files: props.diffs.flatMap((diff) => {
+      files: safeDiffs().flatMap((diff) => {
         if (mediaKindFromPath(diff.file)) return []
 
         return [
