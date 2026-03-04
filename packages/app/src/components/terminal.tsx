@@ -460,6 +460,11 @@ export const Terminal = (props: TerminalProps) => {
       const handleOpen = () => {
         local.onConnect?.()
         scheduleSize(t.cols, t.rows)
+        // Send default command for new terminals (no buffer = new)
+        const cmd = settings.terminal.defaultCommand()
+        if (cmd && !local.pty.buffer) {
+          socket.send(cmd + "\r")
+        }
       }
       socket.addEventListener("open", handleOpen)
       if (socket.readyState === WebSocket.OPEN) handleOpen()

@@ -11,6 +11,7 @@ import { useLanguage } from "@/context/language"
 import { usePlatform } from "@/context/platform"
 import { useSettings, monoFontFamily } from "@/context/settings"
 import { playSound, SOUND_OPTIONS } from "@/utils/sound"
+import { TextField } from "@opencode-ai/ui/text-field"
 import { Link } from "./link"
 
 let demoSoundState = {
@@ -315,6 +316,26 @@ export const SettingsGeneral: Component = () => {
     </div>
   )
 
+  const TerminalSection = () => (
+    <div class="flex flex-col gap-1">
+      <h3 class="text-14-medium text-text-strong pb-2">{language.t("settings.general.section.terminal")}</h3>
+
+      <div class="bg-surface-raised-base px-4 rounded-lg">
+        <SettingsRow
+          title={language.t("settings.general.row.defaultCommand.title")}
+          description={language.t("settings.general.row.defaultCommand.description")}
+        >
+          <TextField
+            value={settings.terminal.defaultCommand()}
+            onChange={(value) => settings.terminal.setDefaultCommand(value)}
+            placeholder="e.g. claude"
+            variant="ghost"
+          />
+        </SettingsRow>
+      </div>
+    </div>
+  )
+
   const NotificationsSection = () => (
     <div class="flex flex-col gap-1">
       <h3 class="text-14-medium text-text-strong pb-2">{language.t("settings.general.section.notifications")}</h3>
@@ -468,6 +489,8 @@ export const SettingsGeneral: Component = () => {
         <AppearanceSection />
 
         <FeedSection />
+
+        <TerminalSection />
 
         <NotificationsSection />
 

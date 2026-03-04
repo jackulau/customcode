@@ -37,6 +37,9 @@ export interface Settings {
   permissions: {
     autoApprove: boolean
   }
+  terminal: {
+    defaultCommand: string
+  }
   notifications: NotificationSettings
   sounds: SoundSettings
 }
@@ -59,6 +62,9 @@ const defaultSettings: Settings = {
   keybinds: {},
   permissions: {
     autoApprove: false,
+  },
+  terminal: {
+    defaultCommand: "",
   },
   notifications: {
     agent: true,
@@ -185,6 +191,12 @@ export const { use: useSettings, provider: SettingsProvider } = createSimpleCont
         autoApprove: withFallback(() => store.permissions?.autoApprove, defaultSettings.permissions.autoApprove),
         setAutoApprove(value: boolean) {
           setStore("permissions", "autoApprove", value)
+        },
+      },
+      terminal: {
+        defaultCommand: withFallback(() => store.terminal?.defaultCommand, ""),
+        setDefaultCommand(value: string) {
+          setStore("terminal", "defaultCommand", value)
         },
       },
       notifications: {

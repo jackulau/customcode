@@ -624,6 +624,9 @@ export const dict = {
   "settings.general.section.updates": "Updates",
   "settings.general.section.sounds": "Sound effects",
   "settings.general.section.feed": "Feed",
+  "settings.general.section.terminal": "Terminal",
+  "settings.general.row.defaultCommand.title": "Default command",
+  "settings.general.row.defaultCommand.description": "Command to run automatically when opening a new terminal",
   "settings.general.section.display": "Display",
 
   "settings.general.row.language.title": "Language",
