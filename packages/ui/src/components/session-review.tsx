@@ -158,6 +158,7 @@ export const SessionReview = (props: SessionReviewProps) => {
   const [searchPos, setSearchPos] = createSignal({ top: 8, right: 8 })
 
   const open = () => props.open ?? store.open
+  const openSet = createMemo(() => new Set(open()))
   const files = createMemo(() => props.diffs.map((d) => d.file))
   const diffs = createMemo(() => new Map(props.diffs.map((d) => [d.file, d] as const)))
   const diffStyle = () => props.diffStyle ?? (props.split ? "split" : "unified")
@@ -630,8 +631,15 @@ export const SessionReview = (props: SessionReviewProps) => {
                     const diff = createMemo(() => diffs().get(file))
                     const item = () => diff()!
 
-                    const expanded = createMemo(() => open().includes(file))
+                    const expanded = createMemo(() => openSet().has(file))
                     const force = () => !!store.force[file]
+
+                    // Mount once, keep alive: diff renders on first expand and survives
+                    // subsequent collapse/expand cycles (CSS handles visibility).
+                    const [shouldMount, setShouldMount] = createSignal(untrack(() => expanded()))
+                    createEffect(() => {
+                      if (expanded()) setShouldMount(true)
+                    })
 
                     const comments = createMemo(() => (props.comments ?? []).filter((c) => c.file === file))
                     const commentedLines = createMemo(() => comments().map((c) => c.selection))
@@ -642,7 +650,6 @@ export const SessionReview = (props: SessionReviewProps) => {
                     const mediaKind = createMemo(() => mediaKindFromPath(file))
 
                     const tooLarge = createMemo(() => {
-                      if (!expanded()) return false
                       if (force()) return false
                       if (mediaKind()) return false
                       return changedLines() > MAX_DIFF_CHANGED_LINES
@@ -658,6 +665,37 @@ export const SessionReview = (props: SessionReviewProps) => {
                       if (!current || current.file !== file) return null
                       return current.range
                     })
+
+                    const beforeConfig = createMemo(() => ({
+                      name: file,
+                      contents: typeof item().before === "string" ? item().before : "",
+                    }))
+                    const afterConfig = createMemo(() => ({
+                      name: file,
+                      contents: typeof item().after === "string" ? item().after : "",
+                    }))
+                    const mediaConfig = createMemo(() => ({
+                      mode: "auto" as const,
+                      path: file,
+                      before: item().before,
+                      after: item().after,
+                      readFile: props.readFile,
+                    }))
+                    const searchRegister = (handle: FileSearchHandle | null) => {
+                      if (!handle) {
+                        searchHandles.delete(file)
+                        readyFiles.delete(file)
+                        if (highlightedFile === file) highlightedFile = undefined
+                        return
+                      }
+                      searchHandles.set(file, handle)
+                    }
+                    const searchConfig = createMemo(() => ({
+                      shortcuts: "disabled" as const,
+                      showBar: false,
+                      disableVirtualization: searchExpanded(),
+                      register: searchRegister,
+                    }))
 
                     const draftRange = createMemo(() => {
                       const current = commenting()
@@ -738,6 +776,7 @@ export const SessionReview = (props: SessionReviewProps) => {
                     return (
                       <Accordion.Item
                         value={file}
+                        forceMount
                         id={diffId(file)}
                         data-file={file}
                         data-slot="session-review-accordion-item"
@@ -809,7 +848,7 @@ export const SessionReview = (props: SessionReviewProps) => {
                               anchors.set(file, el)
                             }}
                           >
-                            <Show when={expanded()}>
+                            <Show when={shouldMount()}>
                               <Switch>
                                 <Match when={tooLarge()}>
                                   <div data-slot="session-review-large-diff">
@@ -854,36 +893,10 @@ export const SessionReview = (props: SessionReviewProps) => {
                                     renderHoverUtility={props.onLineComment ? commentsUi.renderHoverUtility : undefined}
                                     selectedLines={selectedLines()}
                                     commentedLines={commentedLines()}
-                                    search={{
-                                      shortcuts: "disabled",
-                                      showBar: false,
-                                      disableVirtualization: searchExpanded(),
-                                      register: (handle: FileSearchHandle | null) => {
-                                        if (!handle) {
-                                          searchHandles.delete(file)
-                                          readyFiles.delete(file)
-                                          if (highlightedFile === file) highlightedFile = undefined
-                                          return
-                                        }
-
-                                        searchHandles.set(file, handle)
-                                      },
-                                    }}
-                                    before={{
-                                      name: file,
-                                      contents: typeof item().before === "string" ? item().before : "",
-                                    }}
-                                    after={{
-                                      name: file,
-                                      contents: typeof item().after === "string" ? item().after : "",
-                                    }}
-                                    media={{
-                                      mode: "auto",
-                                      path: file,
-                                      before: item().before,
-                                      after: item().after,
-                                      readFile: props.readFile,
-                                    }}
+                                    search={searchConfig()}
+                                    before={beforeConfig()}
+                                    after={afterConfig()}
+                                    media={mediaConfig()}
                                   />
                                 </Match>
                               </Switch>

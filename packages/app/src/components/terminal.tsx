@@ -6,12 +6,14 @@ import { SerializeAddon } from "@/addons/serialize"
 import { matchKeybind, parseKeybind } from "@/context/command"
 import { useLanguage } from "@/context/language"
 import { usePlatform } from "@/context/platform"
+import { usePrompt, type ImageAttachmentPart } from "@/context/prompt"
 import { useSDK } from "@/context/sdk"
 import { useServer } from "@/context/server"
 import { monoFontFamily, useSettings } from "@/context/settings"
 import type { LocalPTY } from "@/context/terminal"
 import { disposeIfDisposable, getHoveredLinkText, setOptionIfSupported } from "@/utils/runtime-adapters"
 import { terminalWriter } from "@/utils/terminal-writer"
+import { uuid } from "@/utils/uuid"
 
 const TOGGLE_TERMINAL_ID = "terminal.toggle"
 const DEFAULT_TOGGLE_TERMINAL_KEYBIND = "ctrl+`"
@@ -69,6 +71,8 @@ const useTerminalUiBindings = (input: {
   cleanups: VoidFunction[]
   handlePointerDown: () => void
   handleLinkClick: (event: MouseEvent) => void
+  onImagePaste?: (file: File) => void
+  readClipboardImage?: () => Promise<File | null>
 }) => {
   const handleCopy = (event: ClipboardEvent) => {
     const selection = input.term.getSelection()
@@ -81,11 +85,46 @@ const useTerminalUiBindings = (input: {
     clipboard.setData("text/plain", selection)
   }
 
-  const handlePaste = (event: ClipboardEvent) => {
+  const handlePaste = async (event: ClipboardEvent) => {
     const clipboard = event.clipboardData
-    const text = clipboard?.getData("text/plain") ?? clipboard?.getData("text") ?? ""
-    if (!text) return
+    if (!clipboard) return
 
+    // Check for image files in browser clipboard
+    const items = Array.from(clipboard.items)
+    const imageItem = items.find((item) => item.kind === "file" && item.type.startsWith("image/"))
+
+    // Capture text synchronously before clipboard data is cleared
+    const text = clipboard.getData("text/plain") ?? clipboard.getData("text") ?? ""
+
+    // Browser clipboard has an image — forward to prompt as attachment
+    if (imageItem && input.onImagePaste) {
+      const file = imageItem.getAsFile()
+      if (file) {
+        event.preventDefault()
+        event.stopPropagation()
+        input.onImagePaste(file)
+        return
+      }
+    }
+
+    // Desktop: Tauri's WKWebView often doesn't expose images via clipboardData.items.
+    // Try the native clipboard before falling back to text so pasting screenshots works.
+    if (input.readClipboardImage && input.onImagePaste) {
+      event.preventDefault()
+      event.stopPropagation()
+      const file = await input.readClipboardImage()
+      if (file) {
+        input.onImagePaste(file)
+        return
+      }
+      // No native image — fall through to text paste
+      if (text) {
+        input.term.paste(text)
+      }
+      return
+    }
+
+    if (!text) return
     event.preventDefault()
     event.stopPropagation()
     input.term.paste(text)
@@ -151,6 +190,7 @@ const persistTerminal = (input: {
 
 export const Terminal = (props: TerminalProps) => {
   const platform = usePlatform()
+  const prompt = usePrompt()
   const sdk = useSDK()
   const settings = useSettings()
   const theme = useTheme()
@@ -402,12 +442,30 @@ export const Terminal = (props: TerminalProps) => {
       serializeAddon = serializer
 
       t.open(container)
+      const onImagePaste = (file: File) => {
+        const reader = new FileReader()
+        reader.onload = () => {
+          const dataUrl = reader.result as string
+          const attachment: ImageAttachmentPart = {
+            type: "image",
+            id: uuid(),
+            filename: file.name,
+            mime: file.type,
+            dataUrl,
+          }
+          prompt.set([...prompt.current(), attachment], prompt.cursor())
+        }
+        reader.readAsDataURL(file)
+      }
+
       useTerminalUiBindings({
         container,
         term: t,
         cleanups,
         handlePointerDown,
         handleLinkClick,
+        onImagePaste,
+        readClipboardImage: platform.readClipboardImage,
       })
 
       focusTerminal()
@@ -449,11 +507,15 @@ export const Terminal = (props: TerminalProps) => {
         })
 
       if (restore && restoreSize) {
+        container.style.visibility = "hidden"
         await write(restore)
         fit.fit()
         scheduleSize(t.cols, t.rows)
         if (typeof local.pty.scrollY === "number") t.scrollToLine(local.pty.scrollY)
         startResize()
+        requestAnimationFrame(() => {
+          if (!disposed) container.style.visibility = ""
+        })
       } else {
         fit.fit()
         scheduleSize(t.cols, t.rows)
@@ -470,6 +532,7 @@ export const Terminal = (props: TerminalProps) => {
 
       const once = { value: false }
       let closing = false
+      let startupSent = false
 
       const url = new URL(sdk.url + `/pty/${local.pty.id}/connect`)
       url.searchParams.set("directory", sdk.directory)
@@ -487,7 +550,8 @@ export const Terminal = (props: TerminalProps) => {
         scheduleSize(t.cols, t.rows)
 
         // Send startup command for new terminals (not restored ones)
-        if (!restore) {
+        if (!restore && !startupSent) {
+          startupSent = true
           const cmd = settings.terminal.startupCommand()
           if (cmd) {
             setTimeout(() => {
@@ -575,18 +639,34 @@ export const Terminal = (props: TerminalProps) => {
 
   onCleanup(() => {
     disposed = true
-
-    // Immediately hide the terminal to prevent visual overlap during transitions
-    // between projects or terminal tabs. The deferred disposal below means the
-    // Ghostty canvas and render loop stay alive briefly after unmount — hiding
-    // the container ensures no stale content is painted for that window.
     container.style.visibility = "hidden"
+
+    // Stop Ghostty's render loop immediately. The deferred disposal
+    // (via output.flush) means t.dispose() runs later — Ghostty's RAF
+    // loop would keep painting stale frames until then. Cancel it now.
+    if (term) {
+      const t = term as unknown as Record<string, unknown>
+      if (typeof t.animationFrameId === "number") {
+        cancelAnimationFrame(t.animationFrameId)
+        t.animationFrameId = undefined
+      }
+      if (typeof t.scrollAnimationFrame === "number") {
+        cancelAnimationFrame(t.scrollAnimationFrame)
+        t.scrollAnimationFrame = undefined
+      }
+    }
+    // Hide canvas element directly — prevents stale GPU content from compositing
+    const canvas = container.querySelector("canvas")
+    if (canvas) canvas.style.display = "none"
 
     if (fitFrame !== undefined) cancelAnimationFrame(fitFrame)
     if (sizeTimer !== undefined) clearTimeout(sizeTimer)
     if (ws && ws.readyState !== WebSocket.CLOSED && ws.readyState !== WebSocket.CLOSING) ws.close(1000)
 
+    let finalized = false
     const finalize = () => {
+      if (finalized) return
+      finalized = true
       persistTerminal({ term, addon: serializeAddon, cursor, pty: local.pty, onCleanup: props.onCleanup })
       cleanup()
     }
@@ -597,6 +677,7 @@ export const Terminal = (props: TerminalProps) => {
     }
 
     output.flush(finalize)
+    setTimeout(finalize, 500)
   })
 
   return (

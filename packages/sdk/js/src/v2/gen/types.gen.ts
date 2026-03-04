@@ -4219,6 +4219,25 @@ export type FileStatusResponses = {
 
 export type FileStatusResponse = FileStatusResponses[keyof FileStatusResponses]
 
+export type FileDiffData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/file/diff"
+}
+
+export type FileDiffResponses = {
+  /**
+   * File diffs
+   */
+  200: Array<FileDiff>
+}
+
+export type FileDiffResponse = FileDiffResponses[keyof FileDiffResponses]
+
 export type McpStatusData = {
   body?: never
   path?: never

@@ -1,4 +1,4 @@
-import { createMemo, For, Show, type Accessor, type JSX } from "solid-js"
+import { For, Show, type Accessor, type JSX } from "solid-js"
 import {
   DragDropProvider,
   DragDropSensors,
@@ -11,11 +11,9 @@ import { ConstrainDragXAxis } from "@/utils/solid-dnd"
 import { IconButton } from "@opencode-ai/ui/icon-button"
 import { Tooltip, TooltipKeybind } from "@opencode-ai/ui/tooltip"
 import { type LocalProject } from "@/context/layout"
-import { sidebarExpanded } from "./sidebar-shell-helpers"
 
 export const SidebarContent = (props: {
   mobile?: boolean
-  opened: Accessor<boolean>
   aimMove: (event: MouseEvent) => void
   projects: Accessor<LocalProject[]>
   renderProject: (project: LocalProject) => JSX.Element
@@ -31,9 +29,7 @@ export const SidebarContent = (props: {
   onOpenSettings: () => void
   helpLabel: Accessor<string>
   onOpenHelp: () => void
-  renderPanel: () => JSX.Element
 }): JSX.Element => {
-  const expanded = createMemo(() => sidebarExpanded(props.mobile, props.opened()))
   const placement = () => (props.mobile ? "bottom" : "right")
 
   return (
@@ -100,7 +96,6 @@ export const SidebarContent = (props: {
         </div>
       </div>
 
-      <Show when={expanded()}>{props.renderPanel()}</Show>
     </div>
   )
 }

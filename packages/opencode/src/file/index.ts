@@ -491,6 +491,75 @@ export namespace File {
     })
   }
 
+  export type FileDiff = {
+    file: string
+    before: string
+    after: string
+    additions: number
+    deletions: number
+    status?: "added" | "deleted" | "modified"
+  }
+
+  export async function diff(): Promise<FileDiff[]> {
+    const project = Instance.project
+    if (project.vcs !== "git") return []
+
+    // Parse numstat directly to detect binary files (shown as "- -" in git output)
+    const binaryFiles = new Set<string>()
+    const numstatOutput = await $`git -c core.quotepath=false diff --numstat HEAD`
+      .cwd(Instance.directory)
+      .quiet()
+      .nothrow()
+      .text()
+    if (numstatOutput.trim()) {
+      for (const line of numstatOutput.trim().split("\n")) {
+        const [added, removed, filepath] = line.split("\t")
+        if (added === "-" && removed === "-" && filepath) {
+          binaryFiles.add(filepath)
+        }
+      }
+    }
+
+    const files = await status()
+    const result: FileDiff[] = []
+
+    for (const info of files) {
+      const isBinary = binaryFiles.has(info.path) || isBinaryByExtension(info.path)
+      let before = ""
+      let after = ""
+
+      if (!isBinary) {
+        if (info.status === "deleted") {
+          before = await $`git -c core.quotepath=false show HEAD:${info.path}`
+            .cwd(Instance.directory)
+            .quiet()
+            .nothrow()
+            .text()
+        } else if (info.status === "added") {
+          after = await Filesystem.readText(path.join(Instance.directory, info.path)).catch(() => "")
+        } else {
+          before = await $`git -c core.quotepath=false show HEAD:${info.path}`
+            .cwd(Instance.directory)
+            .quiet()
+            .nothrow()
+            .text()
+          after = await Filesystem.readText(path.join(Instance.directory, info.path)).catch(() => "")
+        }
+      }
+
+      result.push({
+        file: info.path,
+        before,
+        after,
+        additions: info.added,
+        deletions: info.removed,
+        status: info.status,
+      })
+    }
+
+    return result
+  }
+
   export async function read(file: string): Promise<Content> {
     using _ = log.time("read", { file })
     const project = Instance.project

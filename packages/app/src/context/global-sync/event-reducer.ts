@@ -84,6 +84,7 @@ export function applyDirectoryEvent(input: {
   loadLsp: () => void
   vcsCache?: VcsCache
   setSessionTodo?: (sessionID: string, todos: Todo[] | undefined) => void
+  onFileChanged?: () => void
 }) {
   const event = input.event
   switch (event.type) {
@@ -340,6 +341,10 @@ export function applyDirectoryEvent(input: {
     }
     case "lsp.updated": {
       input.loadLsp()
+      break
+    }
+    case "file.watcher.updated": {
+      input.onFileChanged?.()
       break
     }
   }

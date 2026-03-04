@@ -274,6 +274,45 @@ function createGlobalSync() {
     return promise
   }
 
+  const workingDiffTimers = new Map<string, ReturnType<typeof setTimeout>>()
+  const workingDiffInflight = new Map<string, Promise<void>>()
+
+  function scheduleWorkingDiffRefresh(directory: string, delay = 1000) {
+    const existing = workingDiffTimers.get(directory)
+    if (existing) clearTimeout(existing)
+    workingDiffTimers.set(
+      directory,
+      setTimeout(() => {
+        workingDiffTimers.delete(directory)
+        void fetchWorkingDiff(directory)
+      }, delay),
+    )
+  }
+
+  async function fetchWorkingDiff(directory: string) {
+    if (workingDiffInflight.has(directory)) return
+    const child = children.children[directory]
+    if (!child) return
+    const [, setStore] = child
+    const sdk = sdkFor(directory)
+    const promise = sdk.file
+      .diff()
+      .then((result) => {
+        setStore("working_diff", reconcile(result.data ?? [], { key: "file" }))
+      })
+      .catch(() => {})
+      .finally(() => {
+        workingDiffInflight.delete(directory)
+      })
+    workingDiffInflight.set(directory, promise)
+    return promise
+  }
+
+  onCleanup(() => {
+    for (const timer of workingDiffTimers.values()) clearTimeout(timer)
+    workingDiffTimers.clear()
+  })
+
   const unsub = globalSDK.event.listen((e) => {
     const directory = e.name
     const event = e.details
@@ -309,6 +348,9 @@ function createGlobalSync() {
         sdkFor(directory)
           .lsp.status()
           .then((x) => setStore("lsp", x.data ?? []))
+      },
+      onFileChanged: () => {
+        scheduleWorkingDiffRefresh(directory)
       },
     })
   })
@@ -383,6 +425,10 @@ function createGlobalSync() {
     project: projectApi,
     todo: {
       set: setSessionTodo,
+    },
+    workingDiff: {
+      fetch: fetchWorkingDiff,
+      schedule: scheduleWorkingDiffRefresh,
     },
   }
 }

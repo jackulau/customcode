@@ -20,7 +20,7 @@ import { terminalTabLabel } from "@/pages/session/terminal-label"
 import { focusTerminalById } from "@/pages/session/helpers"
 import { getTerminalHandoff, setTerminalHandoff } from "@/pages/session/handoff"
 
-export function TerminalPanel() {
+export function TerminalPanel(props: { onSubmit?: () => void }) {
   const params = useParams()
   const layout = useLayout()
   const terminal = useTerminal()
@@ -218,13 +218,13 @@ export function TerminalPanel() {
                   </div>
                 </Tabs.List>
               </Tabs>
-              <div class="flex-1 min-h-0 relative overflow-hidden">
+              <div class="flex-1 min-h-0 relative overflow-hidden" style={{ contain: "paint" }}>
                 <Show when={terminal.active()} keyed>
                   {(id) => (
                     <Show when={byId().get(id)}>
                       {(pty) => (
                         <div id={`terminal-wrapper-${id}`} class="absolute inset-0">
-                          <Terminal pty={pty()} onCleanup={terminal.update} onConnectError={() => terminal.clone(id)} />
+                          <Terminal pty={pty()} onSubmit={props.onSubmit} onCleanup={terminal.update} onConnectError={() => terminal.clone(id)} />
                         </div>
                       )}
                     </Show>

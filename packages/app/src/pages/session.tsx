@@ -108,7 +108,9 @@ export default function Page() {
   })
 
   const info = createMemo(() => (params.id ? sync.session.get(params.id) : undefined))
-  const diffs = createMemo(() => (params.id ? (sync.data.session_diff[params.id] ?? []) : []))
+  const sessionDiffs = createMemo(() => (params.id ? (sync.data.session_diff[params.id] ?? []) : []))
+  const workingDiffs = createMemo(() => sync.data.working_diff ?? [])
+  const diffs = createMemo(() => (sessionDiffs().length > 0 ? sessionDiffs() : workingDiffs()))
   const reviewCount = createMemo(() => Math.max(info()?.summary?.files ?? 0, diffs().length))
   const hasReview = createMemo(() => reviewCount() > 0)
   const revertMessageID = createMemo(() => info()?.revert?.messageID)
@@ -145,13 +147,18 @@ export default function Page() {
   )
 
   const [store, setStore] = createStore({
-    changes: "session" as "session" | "turn",
+    changes: "working" as "working" | "session" | "turn",
   })
 
   const turnDiffs = createMemo(() => lastUserMessage()?.summary?.diffs ?? [])
-  const reviewDiffs = createMemo(() => (store.changes === "session" ? diffs() : turnDiffs()))
+  const reviewDiffs = createMemo(() => {
+    if (store.changes === "working") return workingDiffs()
+    if (store.changes === "turn") return turnDiffs()
+    return sessionDiffs()
+  })
 
   const diffsReady = createMemo(() => {
+    if (store.changes === "working") return true
     const id = params.id
     if (!id) return true
     if (!hasReview()) return true
@@ -173,11 +180,21 @@ export default function Page() {
     }),
   )
 
+  // Fetch working directory diffs on mount and when directory changes
+  createEffect(
+    on(
+      () => sdk.directory,
+      () => {
+        void sync.workingDiff.fetch()
+      },
+    ),
+  )
+
   createEffect(
     on(
       sessionKey,
       () => {
-        setStore("changes", "session")
+        setStore("changes", "working")
       },
       { defer: true },
     ),
@@ -270,16 +287,20 @@ export default function Page() {
     loadFile: file.load,
   })
 
-  const changesOptions = ["session", "turn"] as const
+  const changesOptions = ["working", "session", "turn"] as const
   const changesOptionsList = [...changesOptions]
+
+  const changesLabel = (option: (typeof changesOptions)[number]) => {
+    if (option === "working") return language.t("ui.sessionReview.title.workingTree")
+    if (option === "turn") return language.t("ui.sessionReview.title.lastTurn")
+    return language.t("ui.sessionReview.title")
+  }
 
   const changesTitle = () => (
     <Select
       options={changesOptionsList}
       current={store.changes}
-      label={(option) =>
-        option === "session" ? language.t("ui.sessionReview.title") : language.t("ui.sessionReview.title.lastTurn")
-      }
+      label={changesLabel}
       onSelect={(option) => option && setStore("changes", option)}
       variant="ghost"
       size="small"
@@ -302,7 +323,7 @@ export default function Page() {
     emptyClass: string
   }) => (
     <Switch>
-      <Match when={store.changes === "turn" && !!params.id}>
+      <Match when={store.changes === "working" || (store.changes === "turn" && !!params.id)}>
         <SessionReviewTab
           title={changesTitle()}
           empty={emptyTurn()}
@@ -531,16 +552,21 @@ export default function Page() {
 
   createEffect(() => {
     const id = params.id
-    if (!id) return
 
     const wants = isDesktop()
       ? desktopFileTreeOpen() || (desktopReviewOpen() && activeTab() === "review")
       : false
     if (!wants) return
-    if (sync.data.session_diff[id] !== undefined) return
     if (sync.status === "loading") return
 
-    void sync.session.diff(id)
+    if (id && sync.data.session_diff[id] === undefined) {
+      void sync.session.diff(id)
+    }
+
+    // Also fetch working diffs for the review panel
+    if (sync.data.working_diff.length === 0) {
+      void sync.workingDiff.fetch()
+    }
   })
 
   let treeDir: string | undefined
@@ -578,7 +604,7 @@ export default function Page() {
       <div class="flex-1 min-h-0 flex">
         <SessionSidePanel reviewPanel={reviewPanel} activeDiff={tree.activeDiff} focusReviewDiff={focusReviewDiff} />
       </div>
-      <TerminalPanel />
+      <TerminalPanel onSubmit={() => sync.workingDiff.schedule(2000)} />
     </div>
   )
 }

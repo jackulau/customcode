@@ -354,6 +354,14 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
       get directory() {
         return current()[0].path.directory
       },
+      workingDiff: {
+        fetch() {
+          return globalSync.workingDiff.fetch(sdk.directory)
+        },
+        schedule(delay?: number) {
+          globalSync.workingDiff.schedule(sdk.directory, delay)
+        },
+      },
     }
   },
 })
