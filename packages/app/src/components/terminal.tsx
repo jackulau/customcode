@@ -537,6 +537,13 @@ export const Terminal = (props: TerminalProps) => {
 
   onCleanup(() => {
     disposed = true
+
+    // Immediately hide the terminal to prevent visual overlap during transitions
+    // between projects or terminal tabs. The deferred disposal below means the
+    // Ghostty canvas and render loop stay alive briefly after unmount — hiding
+    // the container ensures no stale content is painted for that window.
+    container.style.visibility = "hidden"
+
     if (fitFrame !== undefined) cancelAnimationFrame(fitFrame)
     if (sizeTimer !== undefined) clearTimeout(sizeTimer)
     if (ws && ws.readyState !== WebSocket.CLOSED && ws.readyState !== WebSocket.CLOSING) ws.close(1000)

@@ -41,6 +41,16 @@ export function TerminalPanel() {
     activeDraggable: undefined as string | undefined,
   })
 
+  // Reset autoCreated when workspace changes so a terminal is auto-created
+  // for new projects that have no cached terminals.
+  createEffect(
+    on(
+      () => params.dir,
+      () => setStore("autoCreated", false),
+      { defer: true },
+    ),
+  )
+
   createEffect(() => {
     if (!opened()) {
       setStore("autoCreated", false)
@@ -208,7 +218,7 @@ export function TerminalPanel() {
                   </div>
                 </Tabs.List>
               </Tabs>
-              <div class="flex-1 min-h-0 relative">
+              <div class="flex-1 min-h-0 relative overflow-hidden">
                 <Show when={terminal.active()} keyed>
                   {(id) => (
                     <Show when={byId().get(id)}>
