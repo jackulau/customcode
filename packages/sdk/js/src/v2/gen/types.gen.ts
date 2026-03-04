@@ -727,9 +727,7 @@ export type EventTuiCommandExecute = {
   type: "tui.command.execute"
   properties: {
     command:
-      | "session.list"
       | "session.new"
-      | "session.share"
       | "session.interrupt"
       | "session.compact"
       | "session.page.up"

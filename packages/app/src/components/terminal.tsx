@@ -271,6 +271,31 @@ export const Terminal = (props: TerminalProps) => {
     scheduleFit()
   })
 
+  createEffect(() => {
+    const size = settings.terminal.fontSize()
+    if (!term) return
+    setOptionIfSupported(term, "fontSize", size)
+    scheduleFit()
+  })
+
+  createEffect(() => {
+    const style = settings.terminal.cursorStyle()
+    if (!term) return
+    setOptionIfSupported(term, "cursorStyle", style)
+  })
+
+  createEffect(() => {
+    const blink = settings.terminal.cursorBlink()
+    if (!term) return
+    setOptionIfSupported(term, "cursorBlink", blink)
+  })
+
+  createEffect(() => {
+    const lines = settings.terminal.scrollback()
+    if (!term) return
+    setOptionIfSupported(term, "scrollback", lines)
+  })
+
   let zoom = platform.webviewZoom?.()
   createEffect(() => {
     const next = platform.webviewZoom?.()
@@ -332,16 +357,16 @@ export const Terminal = (props: TerminalProps) => {
           : undefined
 
       const t = new mod.Terminal({
-        cursorBlink: true,
-        cursorStyle: "bar",
+        cursorBlink: settings.terminal.cursorBlink(),
+        cursorStyle: settings.terminal.cursorStyle(),
         cols: restoreSize?.cols,
         rows: restoreSize?.rows,
-        fontSize: 14,
+        fontSize: settings.terminal.fontSize(),
         fontFamily: monoFontFamily(settings.appearance.font()),
         allowTransparency: false,
         convertEol: false,
         theme: terminalColors(),
-        scrollback: 10_000,
+        scrollback: settings.terminal.scrollback(),
         ghostty: g,
       })
       cleanups.push(() => t.dispose())
@@ -460,6 +485,19 @@ export const Terminal = (props: TerminalProps) => {
       const handleOpen = () => {
         local.onConnect?.()
         scheduleSize(t.cols, t.rows)
+
+        // Send startup command for new terminals (not restored ones)
+        if (!restore) {
+          const cmd = settings.terminal.startupCommand()
+          if (cmd) {
+            setTimeout(() => {
+              if (disposed) return
+              if (socket.readyState === WebSocket.OPEN) {
+                socket.send(cmd + "\n")
+              }
+            }, 300)
+          }
+        }
       }
       socket.addEventListener("open", handleOpen)
       if (socket.readyState === WebSocket.OPEN) handleOpen()

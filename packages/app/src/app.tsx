@@ -29,8 +29,15 @@ import DirectoryLayout from "@/pages/directory-layout"
 import Layout from "@/pages/layout"
 import { ErrorPage } from "./pages/error"
 
+const Home = lazy(() => import("@/pages/home"))
 const Session = lazy(() => import("@/pages/session"))
 const Loading = () => <div class="size-full" />
+
+const HomeRoute = () => (
+  <Suspense fallback={<Loading />}>
+    <Home />
+  </Suspense>
+)
 
 const SessionRoute = () => (
   <SessionProviders>
@@ -146,7 +153,7 @@ export function AppInterface(props: {
             <Router
               root={(routerProps) => <RouterRoot appChildren={props.children}>{routerProps.children}</RouterRoot>}
             >
-              <Route path="/" component={SessionIndexRoute} />
+              <Route path="/" component={HomeRoute} />
               <Route path="/:dir" component={DirectoryLayout}>
                 <Route path="/" component={SessionIndexRoute} />
                 <Route path="/session/:id?" component={SessionRoute} />

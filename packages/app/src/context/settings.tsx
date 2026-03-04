@@ -18,6 +18,14 @@ export interface SoundSettings {
   errors: string
 }
 
+export interface TerminalSettings {
+  fontSize: number
+  cursorBlink: boolean
+  cursorStyle: "bar" | "block" | "underline"
+  scrollback: number
+  startupCommand: string
+}
+
 export interface Settings {
   general: {
     autoSave: boolean
@@ -33,6 +41,7 @@ export interface Settings {
     fontSize: number
     font: string
   }
+  terminal: TerminalSettings
   keybinds: Record<string, string>
   permissions: {
     autoApprove: boolean
@@ -55,6 +64,13 @@ const defaultSettings: Settings = {
   appearance: {
     fontSize: 14,
     font: "ibm-plex-mono",
+  },
+  terminal: {
+    fontSize: 14,
+    cursorBlink: true,
+    cursorStyle: "bar",
+    scrollback: 10000,
+    startupCommand: "",
   },
   keybinds: {},
   permissions: {
@@ -162,6 +178,28 @@ export const { use: useSettings, provider: SettingsProvider } = createSimpleCont
         font: withFallback(() => store.appearance?.font, defaultSettings.appearance.font),
         setFont(value: string) {
           setStore("appearance", "font", value)
+        },
+      },
+      terminal: {
+        fontSize: withFallback(() => store.terminal?.fontSize, defaultSettings.terminal.fontSize),
+        setFontSize(value: number) {
+          setStore("terminal", "fontSize", value)
+        },
+        cursorBlink: withFallback(() => store.terminal?.cursorBlink, defaultSettings.terminal.cursorBlink),
+        setCursorBlink(value: boolean) {
+          setStore("terminal", "cursorBlink", value)
+        },
+        cursorStyle: withFallback(() => store.terminal?.cursorStyle, defaultSettings.terminal.cursorStyle),
+        setCursorStyle(value: "bar" | "block" | "underline") {
+          setStore("terminal", "cursorStyle", value)
+        },
+        scrollback: withFallback(() => store.terminal?.scrollback, defaultSettings.terminal.scrollback),
+        setScrollback(value: number) {
+          setStore("terminal", "scrollback", value)
+        },
+        startupCommand: withFallback(() => store.terminal?.startupCommand, defaultSettings.terminal.startupCommand),
+        setStartupCommand(value: string) {
+          setStore("terminal", "startupCommand", value)
         },
       },
       keybinds: {
