@@ -74,12 +74,24 @@ export function createPromptAttachments(input: PromptAttachmentsInput) {
     const fileItems = items.filter((item) => item.kind === "file")
     const imageItems = fileItems.filter((item) => ACCEPTED_FILE_TYPES.includes(item.type))
 
+    // Browser clipboard has image files — use them directly
     if (imageItems.length > 0) {
       for (const item of imageItems) {
         const file = item.getAsFile()
         if (file) await addImageAttachment(file)
       }
       return
+    }
+
+    // Desktop: Tauri's WKWebView often doesn't expose images via clipboardData.items.
+    // Always try the native Tauri clipboard before falling back to text, so that
+    // pasting screenshots or copied images works regardless of browser API gaps.
+    if (input.readClipboardImage) {
+      const file = await input.readClipboardImage()
+      if (file) {
+        await addImageAttachment(file)
+        return
+      }
     }
 
     if (fileItems.length > 0) {
@@ -91,16 +103,6 @@ export function createPromptAttachments(input: PromptAttachmentsInput) {
     }
 
     const plainText = clipboardData.getData("text/plain") ?? ""
-
-    // Desktop: Browser clipboard has no images and no text, try platform's native clipboard for images
-    if (input.readClipboardImage && !plainText) {
-      const file = await input.readClipboardImage()
-      if (file) {
-        await addImageAttachment(file)
-        return
-      }
-    }
-
     if (!plainText) return
 
     if (largePaste(plainText)) {
