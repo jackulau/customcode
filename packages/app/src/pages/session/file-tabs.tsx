@@ -1,4 +1,4 @@
-import { createEffect, createMemo, Match, on, onCleanup, Switch } from "solid-js"
+import { createEffect, createMemo, createSignal, Match, on, onCleanup, Show, Switch } from "solid-js"
 import { createStore } from "solid-js/store"
 import { Dynamic } from "solid-js/web"
 import { useParams } from "@solidjs/router"
@@ -17,6 +17,7 @@ import { selectionFromLines, useFile, type FileSelection, type SelectedLineRange
 import { useComments } from "@/context/comments"
 import { useLanguage } from "@/context/language"
 import { usePrompt } from "@/context/prompt"
+import { useSDK } from "@/context/sdk"
 import { getSessionHandoff } from "@/pages/session/handoff"
 
 function FileCommentMenu(props: {
@@ -59,7 +60,12 @@ export function FileTabContent(props: { tab: string }) {
   const comments = useComments()
   const language = useLanguage()
   const prompt = usePrompt()
+  const sdk = useSDK()
   const fileComponent = useFileComponent()
+
+  const [editing, setEditing] = createSignal(false)
+  const [editContent, setEditContent] = createSignal("")
+  const [saving, setSaving] = createSignal(false)
 
   const sessionKey = createMemo(() => `${params.dir}${params.id ? "/" + params.id : ""}`)
   const tabs = createMemo(() => layout.tabs(sessionKey))
@@ -237,11 +243,19 @@ export function FileTabContent(props: { tab: string }) {
       if (event.defaultPrevented) return
       if (tabs().active() !== props.tab) return
       if (!(event.metaKey || event.ctrlKey) || event.altKey || event.shiftKey) return
-      if (event.key.toLowerCase() !== "f") return
 
-      event.preventDefault()
-      event.stopPropagation()
-      find?.focus()
+      const key = event.key.toLowerCase()
+      if (key === "f") {
+        event.preventDefault()
+        event.stopPropagation()
+        find?.focus()
+        return
+      }
+      if (key === "s" && editing()) {
+        event.preventDefault()
+        event.stopPropagation()
+        void saveFile()
+      }
     }
 
     window.addEventListener("keydown", onKeyDown, { capture: true })
@@ -253,6 +267,7 @@ export function FileTabContent(props: { tab: string }) {
       path,
       () => {
         commentsUi.note.reset()
+        exitEditMode()
       },
       { defer: true },
     ),
@@ -374,6 +389,44 @@ export function FileTabContent(props: { tab: string }) {
     setNote("commenting", null)
   }
 
+  const isEditable = createMemo(() => {
+    const s = state()
+    if (!s?.content) return false
+    return s.content.type === "text" && !s.content.encoding
+  })
+
+  const enterEditMode = () => {
+    setEditContent(contents())
+    setEditing(true)
+  }
+
+  const exitEditMode = () => {
+    setEditing(false)
+    setEditContent("")
+  }
+
+  const saveFile = async () => {
+    const p = path()
+    if (!p) return
+    setSaving(true)
+    try {
+      await sdk.client.file.write({ path: p, content: editContent() })
+      await file.load(p, { force: true })
+      exitEditMode()
+      showToast({
+        variant: "success",
+        title: language.t("toast.file.saved.title"),
+      })
+    } catch {
+      showToast({
+        variant: "error",
+        title: language.t("toast.file.saveFailed.title"),
+      })
+    } finally {
+      setSaving(false)
+    }
+  }
+
   let prev = {
     loaded: false,
     ready: false,
@@ -447,23 +500,62 @@ export function FileTabContent(props: { tab: string }) {
   )
 
   return (
-    <Tabs.Content value={props.tab} class="mt-3 relative h-full">
-      <ScrollView
-        class="h-full"
-        viewportRef={(el: HTMLDivElement) => {
-          scroll = el
-          restoreScroll()
-        }}
-        onScroll={handleScroll as any}
+    <Tabs.Content value={props.tab} class="mt-3 relative h-full flex flex-col">
+      <Show when={state()?.loaded && isEditable()}>
+        <div class="flex items-center gap-2 px-4 pb-2 shrink-0">
+          <Show
+            when={editing()}
+            fallback={
+              <IconButton icon="edit" variant="ghost" size="small" aria-label={language.t("common.edit")} onClick={enterEditMode} />
+            }
+          >
+            <button
+              class="text-11 px-2 py-0.5 rounded bg-surface-invert text-text-invert font-medium disabled:opacity-50"
+              disabled={saving()}
+              onClick={saveFile}
+            >
+              {saving() ? language.t("common.saving") : language.t("common.save")}
+            </button>
+            <button
+              class="text-11 px-2 py-0.5 rounded text-text-secondary hover:text-text"
+              disabled={saving()}
+              onClick={exitEditMode}
+            >
+              {language.t("common.cancel")}
+            </button>
+          </Show>
+        </div>
+      </Show>
+      <Show
+        when={!editing()}
+        fallback={
+          <div class="flex-1 min-h-0">
+            <textarea
+              class="w-full h-full bg-transparent text-text font-mono text-13 leading-5 px-6 py-0 resize-none outline-none border-none"
+              spellcheck={false}
+              value={editContent()}
+              onInput={(e) => setEditContent(e.currentTarget.value)}
+            />
+          </div>
+        }
       >
-        <Switch>
-          <Match when={state()?.loaded}>{renderFile(contents())}</Match>
-          <Match when={state()?.loading}>
-            <div class="px-6 py-4 text-text-weak">{language.t("common.loading")}...</div>
-          </Match>
-          <Match when={state()?.error}>{(err) => <div class="px-6 py-4 text-text-weak">{err()}</div>}</Match>
-        </Switch>
-      </ScrollView>
+        <ScrollView
+          class="flex-1 min-h-0"
+          viewportRef={(el: HTMLDivElement) => {
+            scroll = el
+            restoreScroll()
+          }}
+          onScroll={handleScroll as any}
+        >
+          <Switch>
+            <Match when={state()?.loaded}>{renderFile(contents())}</Match>
+            <Match when={state()?.loading}>
+              <div class="px-6 py-4 text-text-weak">{language.t("common.loading")}...</div>
+            </Match>
+            <Match when={state()?.error}>{(err) => <div class="px-6 py-4 text-text-weak">{err()}</div>}</Match>
+          </Switch>
+        </ScrollView>
+      </Show>
     </Tabs.Content>
   )
 }

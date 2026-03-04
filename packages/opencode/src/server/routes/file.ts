@@ -1,11 +1,15 @@
+import * as path from "path"
 import { Hono } from "hono"
 import { describeRoute, validator, resolver } from "hono-openapi"
 import z from "zod"
+import { Bus } from "../../bus"
 import { File } from "../../file"
+import { FileWatcher } from "../../file/watcher"
 import { Ripgrep } from "../../file/ripgrep"
 import { LSP } from "../../lsp"
 import { Instance } from "../../project/instance"
 import { Snapshot } from "../../snapshot"
+import { Filesystem } from "../../util/filesystem"
 import { lazy } from "../../util/lazy"
 
 export const FileRoutes = lazy(() =>
@@ -215,6 +219,48 @@ export const FileRoutes = lazy(() =>
       async (c) => {
         const diffs = await File.diff()
         return c.json(diffs)
+      },
+    )
+    .post(
+      "/file/content",
+      describeRoute({
+        summary: "Write file",
+        description: "Write content to a specified file.",
+        operationId: "file.write",
+        responses: {
+          200: {
+            description: "File written",
+            content: {
+              "application/json": {
+                schema: resolver(z.object({ ok: z.boolean() })),
+              },
+            },
+          },
+        },
+      }),
+      validator(
+        "json",
+        z.object({
+          path: z.string(),
+          content: z.string(),
+        }),
+      ),
+      async (c) => {
+        const body = c.req.valid("json")
+        const full = path.join(Instance.directory, body.path)
+
+        if (!Instance.containsPath(full)) {
+          throw new Error(`Access denied: path escapes project directory`)
+        }
+
+        const exists = await Filesystem.exists(full)
+        await Filesystem.write(full, body.content)
+        await Bus.publish(File.Event.Edited, { file: full })
+        await Bus.publish(FileWatcher.Event.Updated, {
+          file: full,
+          event: exists ? "change" : "add",
+        })
+        return c.json({ ok: true })
       },
     ),
 )
