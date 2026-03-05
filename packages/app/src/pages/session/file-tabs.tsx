@@ -8,6 +8,7 @@ import { cloneSelectedLineRange, previewSelectedLines } from "@opencode-ai/ui/pi
 import { createLineCommentController } from "@opencode-ai/ui/line-comment-annotations"
 import { sampledChecksum } from "@opencode-ai/util/encode"
 import { DropdownMenu } from "@opencode-ai/ui/dropdown-menu"
+import { Icon } from "@opencode-ai/ui/icon"
 import { IconButton } from "@opencode-ai/ui/icon-button"
 import { Tabs } from "@opencode-ai/ui/tabs"
 import { ScrollView } from "@opencode-ai/ui/scroll-view"
@@ -506,18 +507,24 @@ export function FileTabContent(props: { tab: string }) {
           <Show
             when={editing()}
             fallback={
-              <IconButton icon="edit" variant="ghost" size="small" aria-label={language.t("common.edit")} onClick={enterEditMode} />
+              <button
+                class="flex items-center gap-1.5 text-12-medium px-2.5 py-1 rounded-md text-text-secondary hover:text-text hover:bg-surface-raised-base transition-colors"
+                onClick={enterEditMode}
+              >
+                <Icon name="edit" size="small" />
+                {language.t("common.edit")}
+              </button>
             }
           >
             <button
-              class="text-11 px-2 py-0.5 rounded bg-surface-invert text-text-invert font-medium disabled:opacity-50"
+              class="text-12-medium px-2.5 py-1 rounded-md bg-surface-invert text-text-invert font-medium disabled:opacity-50"
               disabled={saving()}
               onClick={saveFile}
             >
               {saving() ? language.t("common.saving") : language.t("common.save")}
             </button>
             <button
-              class="text-11 px-2 py-0.5 rounded text-text-secondary hover:text-text"
+              class="text-12-medium px-2.5 py-1 rounded-md text-text-secondary hover:text-text hover:bg-surface-raised-base transition-colors"
               disabled={saving()}
               onClick={exitEditMode}
             >
@@ -529,9 +536,9 @@ export function FileTabContent(props: { tab: string }) {
       <Show
         when={!editing()}
         fallback={
-          <div class="flex-1 min-h-0">
+          <div class="flex-1 min-h-0 overflow-auto">
             <textarea
-              class="w-full h-full bg-transparent text-text font-mono text-13 leading-5 px-6 py-0 resize-none outline-none border-none"
+              class="w-full h-full min-h-full bg-background-stronger text-text font-mono text-13 leading-5 px-6 py-2 resize-none outline-none border-none"
               spellcheck={false}
               value={editContent()}
               onInput={(e) => setEditContent(e.currentTarget.value)}

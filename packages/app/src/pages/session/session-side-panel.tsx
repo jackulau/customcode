@@ -214,6 +214,90 @@ export function SessionSidePanel(props: {
         }}
         style={{ width: reviewOpen() ? undefined : `${layout.fileTree.width()}px` }}
       >
+        <Show when={layout.fileTree.opened()}>
+          <div id="file-tree-panel" class="relative shrink-0 h-full" style={{ width: `${layout.fileTree.width()}px` }}>
+            <div
+              class="h-full flex flex-col overflow-hidden group/filetree"
+              classList={{ "border-r border-border-weak-base": reviewOpen() }}
+            >
+              <Tabs
+                variant="pill"
+                value={fileTreeTab()}
+                onChange={setFileTreeTabValue}
+                class="h-full"
+                data-scope="filetree"
+              >
+                <Tabs.List data-scrolled={store.fileTreeScrolled ? "" : undefined}>
+                  <Tabs.Trigger value="changes" class="flex-1" classes={{ button: "w-full" }}>
+                    {reviewCount()}{" "}
+                    {language.t(reviewCount() === 1 ? "session.review.change.one" : "session.review.change.other")}
+                  </Tabs.Trigger>
+                  <Tabs.Trigger value="all" class="flex-1" classes={{ button: "w-full" }}>
+                    {language.t("session.files.all")}
+                  </Tabs.Trigger>
+                </Tabs.List>
+                <Tabs.Content
+                  value="changes"
+                  ref={(el: HTMLDivElement) => (changesEl = el)}
+                  onScroll={(e: UIEvent & { currentTarget: HTMLDivElement }) => syncFileTreeScrolled(e.currentTarget)}
+                  class="bg-background-stronger px-3 py-0"
+                >
+                  <Switch>
+                    <Match when={hasReview()}>
+                      <Show
+                        when={diffsReady()}
+                        fallback={
+                          <div class="px-2 py-2 text-12-regular text-text-weak">
+                            {language.t("common.loading")}
+                            {language.t("common.loading.ellipsis")}
+                          </div>
+                        }
+                      >
+                        <FileTree
+                          path=""
+                          allowed={diffFiles()}
+                          kinds={kinds()}
+                          draggable={false}
+                          active={props.activeDiff}
+                          onFileClick={(node) => props.focusReviewDiff(node.path)}
+                        />
+                      </Show>
+                    </Match>
+                    <Match when={true}>
+                      <div class="mt-8 text-center text-12-regular text-text-weak">
+                        {language.t("session.review.noChanges")}
+                      </div>
+                    </Match>
+                  </Switch>
+                </Tabs.Content>
+                <Tabs.Content
+                  value="all"
+                  ref={(el: HTMLDivElement) => (allEl = el)}
+                  onScroll={(e: UIEvent & { currentTarget: HTMLDivElement }) => syncFileTreeScrolled(e.currentTarget)}
+                  class="bg-background-stronger px-3 py-0"
+                >
+                  <FileTree
+                    path=""
+                    modified={diffFiles()}
+                    kinds={kinds()}
+                    onFileClick={(node) => openTab(file.tab(node.path))}
+                  />
+                </Tabs.Content>
+              </Tabs>
+            </div>
+            <ResizeHandle
+              direction="horizontal"
+              edge="end"
+              size={layout.fileTree.width()}
+              min={200}
+              max={480}
+              collapseThreshold={160}
+              onResize={layout.fileTree.resize}
+              onCollapse={layout.fileTree.close}
+            />
+          </div>
+        </Show>
+
         <Show when={reviewOpen()}>
           <div class="flex-1 min-w-0 h-full">
             <DragDropProvider
@@ -338,90 +422,6 @@ export function SessionSidePanel(props: {
                 </Show>
               </DragOverlay>
             </DragDropProvider>
-          </div>
-        </Show>
-
-        <Show when={layout.fileTree.opened()}>
-          <div id="file-tree-panel" class="relative shrink-0 h-full" style={{ width: `${layout.fileTree.width()}px` }}>
-            <div
-              class="h-full flex flex-col overflow-hidden group/filetree"
-              classList={{ "border-l border-border-weak-base": reviewOpen() }}
-            >
-              <Tabs
-                variant="pill"
-                value={fileTreeTab()}
-                onChange={setFileTreeTabValue}
-                class="h-full"
-                data-scope="filetree"
-              >
-                <Tabs.List data-scrolled={store.fileTreeScrolled ? "" : undefined}>
-                  <Tabs.Trigger value="changes" class="flex-1" classes={{ button: "w-full" }}>
-                    {reviewCount()}{" "}
-                    {language.t(reviewCount() === 1 ? "session.review.change.one" : "session.review.change.other")}
-                  </Tabs.Trigger>
-                  <Tabs.Trigger value="all" class="flex-1" classes={{ button: "w-full" }}>
-                    {language.t("session.files.all")}
-                  </Tabs.Trigger>
-                </Tabs.List>
-                <Tabs.Content
-                  value="changes"
-                  ref={(el: HTMLDivElement) => (changesEl = el)}
-                  onScroll={(e: UIEvent & { currentTarget: HTMLDivElement }) => syncFileTreeScrolled(e.currentTarget)}
-                  class="bg-background-stronger px-3 py-0"
-                >
-                  <Switch>
-                    <Match when={hasReview()}>
-                      <Show
-                        when={diffsReady()}
-                        fallback={
-                          <div class="px-2 py-2 text-12-regular text-text-weak">
-                            {language.t("common.loading")}
-                            {language.t("common.loading.ellipsis")}
-                          </div>
-                        }
-                      >
-                        <FileTree
-                          path=""
-                          allowed={diffFiles()}
-                          kinds={kinds()}
-                          draggable={false}
-                          active={props.activeDiff}
-                          onFileClick={(node) => props.focusReviewDiff(node.path)}
-                        />
-                      </Show>
-                    </Match>
-                    <Match when={true}>
-                      <div class="mt-8 text-center text-12-regular text-text-weak">
-                        {language.t("session.review.noChanges")}
-                      </div>
-                    </Match>
-                  </Switch>
-                </Tabs.Content>
-                <Tabs.Content
-                  value="all"
-                  ref={(el: HTMLDivElement) => (allEl = el)}
-                  onScroll={(e: UIEvent & { currentTarget: HTMLDivElement }) => syncFileTreeScrolled(e.currentTarget)}
-                  class="bg-background-stronger px-3 py-0"
-                >
-                  <FileTree
-                    path=""
-                    modified={diffFiles()}
-                    kinds={kinds()}
-                    onFileClick={(node) => openTab(file.tab(node.path))}
-                  />
-                </Tabs.Content>
-              </Tabs>
-            </div>
-            <ResizeHandle
-              direction="horizontal"
-              edge="start"
-              size={layout.fileTree.width()}
-              min={200}
-              max={480}
-              collapseThreshold={160}
-              onResize={layout.fileTree.resize}
-              onCollapse={layout.fileTree.close}
-            />
           </div>
         </Show>
       </aside>
