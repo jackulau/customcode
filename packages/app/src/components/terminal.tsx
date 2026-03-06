@@ -73,6 +73,7 @@ const useTerminalUiBindings = (input: {
   handleLinkClick: (event: MouseEvent) => void
   onImagePaste?: (file: File) => void
   readClipboardImage?: () => Promise<File | null>
+  readClipboardText?: () => Promise<string>
 }) => {
   const handleCopy = (event: ClipboardEvent) => {
     const selection = input.term.getSelection()
@@ -85,6 +86,37 @@ const useTerminalUiBindings = (input: {
     clipboard.setData("text/plain", selection)
   }
 
+  // Desktop: intercept paste on keydown instead of relying on the paste event.
+  // On macOS WKWebView, the paste event may not fire when the clipboard contains
+  // only an image and the focused element is a textarea. By handling Cmd/Ctrl+V
+  // on keydown, we can proactively check the native clipboard for images.
+  const handleDesktopPasteKeydown = async (event: KeyboardEvent) => {
+    const isPaste = (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "v"
+    if (!isPaste) return
+
+    // Block the default paste — we handle both image and text via native APIs
+    event.preventDefault()
+    event.stopPropagation()
+
+    // Try image first
+    if (input.readClipboardImage && input.onImagePaste) {
+      const file = await input.readClipboardImage()
+      if (file) {
+        input.onImagePaste(file)
+        return
+      }
+    }
+
+    // No image — paste text via native clipboard API
+    if (input.readClipboardText) {
+      const text = await input.readClipboardText()
+      if (text) {
+        input.term.paste(text)
+      }
+    }
+  }
+
+  // Web fallback: use the browser paste event (works when native APIs aren't available)
   const handlePaste = async (event: ClipboardEvent) => {
     const clipboard = event.clipboardData
     if (!clipboard) return
@@ -107,25 +139,6 @@ const useTerminalUiBindings = (input: {
       }
     }
 
-    // Desktop: Tauri's WKWebView often doesn't expose images via clipboardData.items.
-    // Try the native clipboard before falling back to text so pasting screenshots works.
-    if (input.readClipboardImage && input.onImagePaste) {
-      event.preventDefault()
-      event.stopPropagation()
-      const file = await input.readClipboardImage()
-      if (file) {
-        input.onImagePaste(file)
-        return
-      }
-      // No native image — fall through to text paste only if there's real text content.
-      // When pasting images, WKWebView may expose garbage text (em dashes, etc.) so
-      // only paste if the text looks like actual content (not a single special character).
-      if (text && text.length > 1) {
-        input.term.paste(text)
-      }
-      return
-    }
-
     if (!text) return
     event.preventDefault()
     event.stopPropagation()
@@ -142,6 +155,13 @@ const useTerminalUiBindings = (input: {
   input.container.addEventListener("copy", handleCopy, true)
   input.cleanups.push(() => input.container.removeEventListener("copy", handleCopy, true))
 
+  if (input.readClipboardImage || input.readClipboardText) {
+    // Desktop: use keydown-based paste for reliable image support
+    input.container.addEventListener("keydown", handleDesktopPasteKeydown, true)
+    input.cleanups.push(() => input.container.removeEventListener("keydown", handleDesktopPasteKeydown, true))
+  }
+
+  // Always register paste handler as fallback (for right-click paste, non-keyboard paste, web)
   input.container.addEventListener("paste", handlePaste, true)
   input.cleanups.push(() => input.container.removeEventListener("paste", handlePaste, true))
 
@@ -468,6 +488,7 @@ export const Terminal = (props: TerminalProps) => {
         handleLinkClick,
         onImagePaste,
         readClipboardImage: platform.readClipboardImage,
+        readClipboardText: platform.readClipboardText,
       })
 
       focusTerminal()
