@@ -553,99 +553,150 @@ export const Terminal = (props: TerminalProps) => {
       // console.log("Scroll position:", ydisp)
       // })
 
-      const once = { value: false }
-      let closing = false
       let startupSent = false
-
-      const url = new URL(sdk.url + `/pty/${local.pty.id}/connect`)
-      url.searchParams.set("directory", sdk.directory)
-      url.searchParams.set("cursor", String(start !== undefined ? start : local.pty.buffer ? -1 : 0))
-      url.protocol = url.protocol === "https:" ? "wss:" : "ws:"
-      url.username = server.current?.http.username ?? ""
-      url.password = server.current?.http.password ?? ""
-
-      const socket = new WebSocket(url)
-      socket.binaryType = "arraybuffer"
-      ws = socket
-
-      const handleOpen = () => {
-        local.onConnect?.()
-        scheduleSize(t.cols, t.rows)
-
-        // Send startup command for new terminals (not restored ones)
-        if (!restore && !startupSent) {
-          startupSent = true
-          const cmd = settings.terminal.startupCommand()
-          if (cmd) {
-            setTimeout(() => {
-              if (disposed) return
-              if (socket.readyState === WebSocket.OPEN) {
-                socket.send(cmd + "\n")
-              }
-            }, 50)
-          }
-        }
-      }
-      socket.addEventListener("open", handleOpen)
-      if (socket.readyState === WebSocket.OPEN) handleOpen()
-
+      let reconnectDelay = 1000
+      let reconnectAttempts = 0
+      let reconnectTimer: ReturnType<typeof setTimeout> | undefined
+      let currentSocketCleanup: VoidFunction | undefined
+      let isFirstConnect = true
       const decoder = new TextDecoder()
-      const handleMessage = (event: MessageEvent) => {
+      const initialCursor = start !== undefined ? start : local.pty.buffer ? -1 : 0
+      const MAX_RECONNECT_ATTEMPTS = 5
+
+      const connectSocket = () => {
         if (disposed) return
-        if (closing) return
-        if (event.data instanceof ArrayBuffer) {
-          const bytes = new Uint8Array(event.data)
-          if (bytes[0] !== 0) return
-          const json = decoder.decode(bytes.subarray(1))
-          try {
-            const meta = JSON.parse(json) as { cursor?: unknown }
-            const next = meta?.cursor
-            if (typeof next === "number" && Number.isSafeInteger(next) && next >= 0) {
-              cursor = next
-            }
-          } catch (err) {
-            debugTerminal("invalid websocket control frame", err)
+
+        currentSocketCleanup?.()
+
+        const url = new URL(sdk.url + `/pty/${local.pty.id}/connect`)
+        url.searchParams.set("directory", sdk.directory)
+        // First connection uses saved/initial cursor; reconnections use tracked position
+        const serverCursor = isFirstConnect ? initialCursor : cursor
+        isFirstConnect = false
+        url.searchParams.set("cursor", String(serverCursor))
+        url.protocol = url.protocol === "https:" ? "wss:" : "ws:"
+        url.username = server.current?.http.username ?? ""
+        url.password = server.current?.http.password ?? ""
+
+        const socket = new WebSocket(url)
+        socket.binaryType = "arraybuffer"
+        ws = socket
+        let closing = false
+        let lastMessageAt = Date.now()
+
+        // Detect stale connections: server sends heartbeat every 30s,
+        // so no messages for 45s means the connection is dead.
+        const staleCheck = setInterval(() => {
+          if (disposed || closing) {
+            clearInterval(staleCheck)
+            return
           }
-          return
+          if (socket.readyState !== WebSocket.OPEN) return
+          if (Date.now() - lastMessageAt > 45_000) {
+            debugTerminal("connection stale, forcing reconnect")
+            clearInterval(staleCheck)
+            socket.close(4000, "stale")
+          }
+        }, 15_000)
+
+        const handleOpen = () => {
+          reconnectDelay = 1000
+          local.onConnect?.()
+          scheduleSize(t.cols, t.rows)
+
+          if (!restore && !startupSent) {
+            startupSent = true
+            const cmd = settings.terminal.startupCommand()
+            if (cmd) {
+              setTimeout(() => {
+                if (disposed) return
+                if (socket.readyState === WebSocket.OPEN) {
+                  socket.send(cmd + "\n")
+                }
+              }, 50)
+            }
+          }
         }
+        socket.addEventListener("open", handleOpen)
+        if (socket.readyState === WebSocket.OPEN) handleOpen()
 
-        const data = typeof event.data === "string" ? event.data : ""
-        if (!data) return
-        output?.push(data)
-        cursor += data.length
-      }
-      socket.addEventListener("message", handleMessage)
+        const handleMessage = (event: MessageEvent) => {
+          if (disposed) return
+          if (closing) return
+          lastMessageAt = Date.now()
+          reconnectAttempts = 0
 
-      const handleError = (error: Event) => {
-        if (disposed) return
-        if (closing) return
-        if (once.value) return
-        once.value = true
-        console.error("WebSocket error:", error)
-        local.onConnectError?.(error)
-      }
-      socket.addEventListener("error", handleError)
+          if (event.data instanceof ArrayBuffer) {
+            const bytes = new Uint8Array(event.data)
+            if (bytes[0] !== 0) return
+            const json = decoder.decode(bytes.subarray(1))
+            try {
+              const meta = JSON.parse(json) as { cursor?: unknown }
+              const next = meta?.cursor
+              if (typeof next === "number" && Number.isSafeInteger(next) && next >= 0) {
+                cursor = next
+              }
+            } catch (err) {
+              debugTerminal("invalid websocket control frame", err)
+            }
+            return
+          }
 
-      const handleClose = (event: CloseEvent) => {
-        if (disposed) return
-        if (closing) return
-        // Normal closure (code 1000) means PTY process exited - server event handles cleanup
-        // For other codes (network issues, server restart), trigger error handler
-        if (event.code !== 1000) {
-          if (once.value) return
-          once.value = true
-          local.onConnectError?.(new Error(`WebSocket closed abnormally: ${event.code}`))
+          const data = typeof event.data === "string" ? event.data : ""
+          if (!data) return
+          output?.push(data)
+          cursor += data.length
+        }
+        socket.addEventListener("message", handleMessage)
+
+        const handleError = (error: Event) => {
+          if (disposed) return
+          if (closing) return
+          debugTerminal("WebSocket error:", error)
+        }
+        socket.addEventListener("error", handleError)
+
+        const handleClose = (event: CloseEvent) => {
+          if (disposed) return
+          if (closing) return
+          clearInterval(staleCheck)
+
+          // Normal closure (code 1000) means PTY process exited
+          if (event.code === 1000) return
+
+          // Abnormal close — attempt reconnection with exponential backoff
+          reconnectAttempts++
+          if (reconnectAttempts > MAX_RECONNECT_ATTEMPTS) {
+            local.onConnectError?.(new Error(`Connection lost after ${MAX_RECONNECT_ATTEMPTS} reconnect attempts`))
+            return
+          }
+
+          debugTerminal("connection lost (code", event.code + "), reconnecting in", reconnectDelay, "ms")
+          reconnectTimer = setTimeout(() => {
+            reconnectTimer = undefined
+            if (disposed) return
+            connectSocket()
+          }, reconnectDelay)
+          reconnectDelay = Math.min(reconnectDelay * 2, 10_000)
+        }
+        socket.addEventListener("close", handleClose)
+
+        currentSocketCleanup = () => {
+          closing = true
+          clearInterval(staleCheck)
+          socket.removeEventListener("open", handleOpen)
+          socket.removeEventListener("message", handleMessage)
+          socket.removeEventListener("error", handleError)
+          socket.removeEventListener("close", handleClose)
+          if (socket.readyState !== WebSocket.CLOSED && socket.readyState !== WebSocket.CLOSING) socket.close(1000)
         }
       }
-      socket.addEventListener("close", handleClose)
+
+      connectSocket()
 
       cleanups.push(() => {
-        closing = true
-        socket.removeEventListener("open", handleOpen)
-        socket.removeEventListener("message", handleMessage)
-        socket.removeEventListener("error", handleError)
-        socket.removeEventListener("close", handleClose)
-        if (socket.readyState !== WebSocket.CLOSED && socket.readyState !== WebSocket.CLOSING) socket.close(1000)
+        if (reconnectTimer) clearTimeout(reconnectTimer)
+        currentSocketCleanup?.()
       })
     }
 

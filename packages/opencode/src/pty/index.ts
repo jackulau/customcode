@@ -311,12 +311,29 @@ export namespace Pty {
       ws.close()
       return
     }
+
+    // Periodic heartbeat — send cursor metadata to keep connection alive
+    // and allow clients to detect stale connections.
+    const heartbeat = setInterval(() => {
+      if (ws.readyState !== 1) {
+        clearInterval(heartbeat)
+        return
+      }
+      try {
+        ws.send(meta(session.cursor))
+      } catch {
+        clearInterval(heartbeat)
+        cleanup()
+      }
+    }, 30_000)
+
     return {
       onMessage: (message: string | ArrayBuffer) => {
         session.process.write(String(message))
       },
       onClose: () => {
         log.info("client disconnected from session", { id })
+        clearInterval(heartbeat)
         cleanup()
       },
     }
