@@ -185,8 +185,17 @@ export const { use: useLayout, provider: LayoutProvider } = createSimpleContext(
       const terminal = value.terminal
       const migratedTerminal = (() => {
         if (!isRecord(terminal)) return terminal
-        if (terminal.opened === true) return terminal
-        return { ...terminal, opened: true }
+        let changed = false
+        const next = { ...terminal }
+        if (next.opened !== true) {
+          next.opened = true
+          changed = true
+        }
+        if (!isRecord(next.byWorkspace)) {
+          next.byWorkspace = {}
+          changed = true
+        }
+        return changed ? next : terminal
       })()
 
       const migratedSessionTabs = (() => {
@@ -246,6 +255,7 @@ export const { use: useLayout, provider: LayoutProvider } = createSimpleContext(
         terminal: {
           height: DEFAULT_TERMINAL_HEIGHT,
           opened: true,
+          byWorkspace: {} as Record<string, boolean>,
         },
         review: {
           diffStyle: "split" as ReviewDiffStyle,
@@ -743,19 +753,32 @@ export const { use: useLayout, provider: LayoutProvider } = createSimpleContext(
       view(sessionKey: string | Accessor<string>) {
         const key = createSessionKeyReader(sessionKey, ensureKey)
         const s = createMemo(() => store.sessionView[key()] ?? { scroll: {} })
-        const terminalOpened = createMemo(() => store.terminal?.opened ?? true)
+        const workspaceDir = createMemo(() => key().split("/")[0] ?? "")
+        const terminalOpened = createMemo(() => {
+          const dir = workspaceDir()
+          const perWorkspace = dir ? store.terminal?.byWorkspace?.[dir] : undefined
+          if (perWorkspace !== undefined) return perWorkspace
+          return store.terminal?.opened ?? true
+        })
         const reviewPanelOpened = createMemo(() => store.review?.panelOpened ?? true)
 
         function setTerminalOpened(next: boolean) {
           const current = store.terminal
           if (!current) {
-            setStore("terminal", { height: DEFAULT_TERMINAL_HEIGHT, opened: next })
+            setStore("terminal", { height: DEFAULT_TERMINAL_HEIGHT, opened: next, byWorkspace: {} })
             return
           }
 
-          const value = current.opened ?? false
-          if (value === next) return
-          setStore("terminal", "opened", next)
+          const dir = workspaceDir()
+          if (dir) {
+            const value = current.byWorkspace?.[dir]
+            if (value === next) return
+            setStore("terminal", "byWorkspace", dir, next)
+          } else {
+            const value = current.opened ?? false
+            if (value === next) return
+            setStore("terminal", "opened", next)
+          }
         }
 
         function setReviewPanelOpened(next: boolean) {

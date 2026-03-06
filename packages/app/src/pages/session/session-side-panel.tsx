@@ -20,6 +20,7 @@ import { useCommand } from "@/context/command"
 import { useFile, type SelectedLineRange } from "@/context/file"
 import { useLanguage } from "@/context/language"
 import { useLayout } from "@/context/layout"
+import { useSettings } from "@/context/settings"
 import { useSync } from "@/context/sync"
 import { createFileTabListSync } from "@/pages/session/file-tab-scroll"
 import { FileTabContent } from "@/pages/session/file-tabs"
@@ -34,6 +35,7 @@ export function SessionSidePanel(props: {
 }) {
   const params = useParams()
   const layout = useLayout()
+  const settings = useSettings()
   const sync = useSync()
   const file = useFile()
   const language = useLanguage()
@@ -202,15 +204,19 @@ export function SessionSidePanel(props: {
     })
   })
 
+  const sidebarRight = createMemo(() => settings.general.sidebarPosition() === "right")
+
   return (
     <Show when={open()}>
       <aside
         id="review-panel"
         aria-label={language.t("session.panel.reviewAndFiles")}
-        class="relative min-w-0 h-full border-l border-border-weak-base flex"
+        class="relative min-w-0 h-full border-border-weak-base flex"
         classList={{
           "flex-1": reviewOpen(),
           "shrink-0": !reviewOpen(),
+          "border-l": !sidebarRight(),
+          "border-r flex-row-reverse": sidebarRight(),
         }}
         style={{ width: reviewOpen() ? undefined : `${layout.fileTree.width()}px` }}
       >
@@ -218,7 +224,10 @@ export function SessionSidePanel(props: {
           <div id="file-tree-panel" class="relative shrink-0 h-full" style={{ width: `${layout.fileTree.width()}px` }}>
             <div
               class="h-full flex flex-col overflow-hidden group/filetree"
-              classList={{ "border-r border-border-weak-base": reviewOpen() }}
+              classList={{
+                "border-r border-border-weak-base": reviewOpen() && !sidebarRight(),
+                "border-l border-border-weak-base": reviewOpen() && sidebarRight(),
+              }}
             >
               <Tabs
                 variant="pill"
@@ -287,7 +296,7 @@ export function SessionSidePanel(props: {
             </div>
             <ResizeHandle
               direction="horizontal"
-              edge="end"
+              edge={sidebarRight() ? "start" : "end"}
               size={layout.fileTree.width()}
               min={200}
               max={480}

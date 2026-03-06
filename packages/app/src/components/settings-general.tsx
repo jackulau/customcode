@@ -245,6 +245,30 @@ export const SettingsGeneral: Component = () => {
         </SettingsRow>
 
         <SettingsRow
+          title={language.t("settings.general.row.sidebarPosition.title")}
+          description={language.t("settings.general.row.sidebarPosition.description")}
+        >
+          <Select
+            data-action="settings-sidebar-position"
+            options={[
+              { value: "left" as const, label: language.t("settings.general.row.sidebarPosition.left") },
+              { value: "right" as const, label: language.t("settings.general.row.sidebarPosition.right") },
+            ]}
+            current={
+              settings.general.sidebarPosition() === "right"
+                ? { value: "right" as const, label: language.t("settings.general.row.sidebarPosition.right") }
+                : { value: "left" as const, label: language.t("settings.general.row.sidebarPosition.left") }
+            }
+            value={(o) => o.value}
+            label={(o) => o.label}
+            onSelect={(option) => option && settings.general.setSidebarPosition(option.value)}
+            variant="secondary"
+            size="small"
+            triggerVariant="settings"
+          />
+        </SettingsRow>
+
+        <SettingsRow
           title={language.t("settings.general.row.font.title")}
           description={language.t("settings.general.row.font.description")}
         >

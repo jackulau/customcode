@@ -33,6 +33,7 @@ export interface Settings {
     showReasoningSummaries: boolean
     shellToolPartsExpanded: boolean
     editToolPartsExpanded: boolean
+    sidebarPosition: "left" | "right"
   }
   updates: {
     startup: boolean
@@ -57,6 +58,7 @@ const defaultSettings: Settings = {
     showReasoningSummaries: false,
     shellToolPartsExpanded: true,
     editToolPartsExpanded: false,
+    sidebarPosition: "left",
   },
   updates: {
     startup: true,
@@ -162,6 +164,13 @@ export const { use: useSettings, provider: SettingsProvider } = createSimpleCont
         ),
         setEditToolPartsExpanded(value: boolean) {
           setStore("general", "editToolPartsExpanded", value)
+        },
+        sidebarPosition: withFallback(
+          () => store.general?.sidebarPosition,
+          defaultSettings.general.sidebarPosition,
+        ),
+        setSidebarPosition(value: "left" | "right") {
+          setStore("general", "sidebarPosition", value)
         },
       },
       updates: {
