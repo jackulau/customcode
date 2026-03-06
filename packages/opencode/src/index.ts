@@ -46,6 +46,8 @@ process.on("uncaughtException", (e) => {
   })
 })
 
+process.on("SIGHUP", () => process.exit(0))
+
 let cli = yargs(hideBin(process.argv))
   .parserConfiguration({ "populate--": true })
   .scriptName("opencode")

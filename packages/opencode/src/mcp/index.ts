@@ -233,14 +233,29 @@ export namespace MCP {
         }
       }
 
+      const CLOSE_TIMEOUT_MS = 5000
       await Promise.all(
-        Object.values(state.clients).map((client) =>
-          client.close().catch((error) => {
-            log.error("Failed to close MCP client", {
-              error,
-            })
-          }),
-        ),
+        Object.values(state.clients).map(async (client) => {
+          const pid = (client.transport as any)?.pid
+          try {
+            await Promise.race([
+              client.close(),
+              new Promise((_, reject) =>
+                setTimeout(
+                  () => reject(new Error("close timeout")),
+                  CLOSE_TIMEOUT_MS,
+                ),
+              ),
+            ])
+          } catch (error) {
+            log.error("Failed to close MCP client", { error })
+            if (typeof pid === "number") {
+              try {
+                process.kill(pid, "SIGKILL")
+              } catch {}
+            }
+          }
+        }),
       )
       pendingOAuthTransports.clear()
     },
@@ -454,6 +469,7 @@ export namespace MCP {
           ...process.env,
           ...(cmd === "opencode" ? { BUN_BE_BUN: "1" } : {}),
           ...mcp.environment,
+          OPENCODE_PID: String(process.pid),
         },
       })
       transport.stderr?.on("data", (chunk: Buffer) => {

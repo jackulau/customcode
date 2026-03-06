@@ -761,7 +761,7 @@ export namespace Session {
         .run()
       Database.effect(() =>
         Bus.publish(MessageV2.Event.PartUpdated, {
-          part,
+          part: structuredClone(part),
         }),
       )
     })
@@ -777,7 +777,7 @@ export namespace Session {
       delta: z.string(),
     }),
     async (input) => {
-      Bus.publish(MessageV2.Event.PartDelta, input)
+      Bus.publish(MessageV2.Event.PartDelta, structuredClone(input))
     },
   )
 
