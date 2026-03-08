@@ -1,4 +1,5 @@
 import { createStore, produce, reconcile } from "solid-js/store"
+import { batch } from "solid-js"
 import type { FileNode } from "@opencode-ai/sdk/v2"
 
 type DirectoryState = {
@@ -29,9 +30,11 @@ export function createFileTreeStore(options: TreeStoreOptions) {
 
   const reset = () => {
     inflight.clear()
-    setTree("node", reconcile({}))
-    setTree("dir", reconcile({}))
-    setTree("dir", "", { expanded: true })
+    batch(() => {
+      setTree("node", reconcile({}))
+      setTree("dir", reconcile({}))
+      setTree("dir", "", { expanded: true })
+    })
   }
 
   const ensureDir = (path: string) => {

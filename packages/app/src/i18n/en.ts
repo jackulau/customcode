@@ -499,6 +499,7 @@ export const dict = {
   "notification.session.responseReady.title": "Response ready",
   "notification.session.error.title": "Session error",
   "notification.session.error.fallbackDescription": "An error occurred",
+  "notification.external.defaultTitle": "Task complete",
 
   "home.recentProjects": "Recent projects",
   "home.empty.title": "No recent projects",
@@ -626,6 +627,7 @@ export const dict = {
   "settings.general.section.updates": "Updates",
   "settings.general.section.sounds": "Sound effects",
   "settings.general.section.feed": "Feed",
+  "settings.general.section.editor": "Editor",
   "settings.general.section.display": "Display",
 
   "settings.general.row.language.title": "Language",
@@ -648,6 +650,12 @@ export const dict = {
   "settings.general.row.editToolPartsExpanded.title": "Expand edit tool parts",
   "settings.general.row.editToolPartsExpanded.description":
     "Show edit, write, and patch tool parts expanded by default in the timeline",
+
+  "settings.general.row.autoSave.title": "Auto-save",
+  "settings.general.row.autoSave.description": "Automatically save files while editing",
+
+  "fileTab.mode.comment": "Comment",
+  "fileTab.mode.edit": "Edit",
 
   "settings.general.row.wayland.title": "Use native Wayland",
   "settings.general.row.wayland.description": "Disable X11 fallback on Wayland. Requires restart.",

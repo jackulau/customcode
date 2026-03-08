@@ -531,7 +531,12 @@ export const Terminal = (props: TerminalProps) => {
 
       if (restore && restoreSize) {
         container.style.visibility = "hidden"
-        await write(restore)
+        try {
+          await write(restore)
+        } catch (err) {
+          debugTerminal("failed to restore terminal buffer", err)
+          t.clear()
+        }
         fit.fit()
         scheduleSize(t.cols, t.rows)
         if (typeof local.pty.scrollY === "number") t.scrollToLine(local.pty.scrollY)
@@ -543,7 +548,12 @@ export const Terminal = (props: TerminalProps) => {
         fit.fit()
         scheduleSize(t.cols, t.rows)
         if (restore) {
-          await write(restore)
+          try {
+            await write(restore)
+          } catch (err) {
+            debugTerminal("failed to restore terminal buffer", err)
+            t.clear()
+          }
           if (typeof local.pty.scrollY === "number") t.scrollToLine(local.pty.scrollY)
         }
         startResize()
@@ -559,6 +569,7 @@ export const Terminal = (props: TerminalProps) => {
       let reconnectTimer: ReturnType<typeof setTimeout> | undefined
       let currentSocketCleanup: VoidFunction | undefined
       let isFirstConnect = true
+      let hasEverConnected = false
       const decoder = new TextDecoder()
       const initialCursor = start !== undefined ? start : local.pty.buffer ? -1 : 0
       const MAX_RECONNECT_ATTEMPTS = 5
@@ -600,6 +611,7 @@ export const Terminal = (props: TerminalProps) => {
         }, 15_000)
 
         const handleOpen = () => {
+          hasEverConnected = true
           reconnectDelay = 1000
           local.onConnect?.()
           scheduleSize(t.cols, t.rows)
@@ -664,6 +676,12 @@ export const Terminal = (props: TerminalProps) => {
           // Normal closure (code 1000) means PTY process exited
           if (event.code === 1000) return
 
+          // Never connected (e.g. stale PTY after restart) — skip retries
+          if (!hasEverConnected) {
+            local.onConnectError?.(new Error("PTY not found on server"))
+            return
+          }
+
           // Abnormal close — attempt reconnection with exponential backoff
           reconnectAttempts++
           if (reconnectAttempts > MAX_RECONNECT_ATTEMPTS) {
@@ -694,7 +712,24 @@ export const Terminal = (props: TerminalProps) => {
 
       connectSocket()
 
+      // On wake from sleep, tear down stale WebSocket and reconnect immediately.
+      // The periodic stale check (15s interval) would eventually catch this, but
+      // forcing it here avoids a visible delay after resuming from sleep.
+      const handleWake = () => {
+        if (disposed) return
+        currentSocketCleanup?.()
+        if (reconnectTimer) {
+          clearTimeout(reconnectTimer)
+          reconnectTimer = undefined
+        }
+        reconnectAttempts = 0
+        reconnectDelay = 1000
+        connectSocket()
+      }
+      window.addEventListener("opencode:wake", handleWake)
+
       cleanups.push(() => {
+        window.removeEventListener("opencode:wake", handleWake)
         if (reconnectTimer) clearTimeout(reconnectTimer)
         currentSocketCleanup?.()
       })

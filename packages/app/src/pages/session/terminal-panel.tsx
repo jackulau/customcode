@@ -226,12 +226,16 @@ export function TerminalPanel(props: { onSubmit?: () => void }) {
                       class="absolute inset-0"
                       style={{ visibility: terminal.active() === pty.id ? "visible" : "hidden" }}
                     >
-                      <Terminal
-                        pty={pty}
-                        onSubmit={props.onSubmit}
-                        onCleanup={terminal.update}
-                        onConnectError={() => terminal.clone(pty.id)}
-                      />
+                      {/* keyed Show forces Terminal to remount when the PTY ID changes
+                          (e.g. after clone re-creates a dead PTY on app restart) */}
+                      <Show when={pty.id} keyed>
+                        <Terminal
+                          pty={pty}
+                          onSubmit={props.onSubmit}
+                          onCleanup={terminal.update}
+                          onConnectError={() => terminal.clone(pty.id)}
+                        />
+                      </Show>
                     </div>
                   )}
                 </For>

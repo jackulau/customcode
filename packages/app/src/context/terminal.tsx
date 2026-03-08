@@ -209,12 +209,13 @@ function createWorkspaceTerminalSession(sdk: ReturnType<typeof useSDK>, dir: str
           id: clone.data.id,
           title: clone.data.title ?? pty.title,
           titleNumber: pty.titleNumber,
-          // New PTY process, so start clean.
-          buffer: undefined,
+          // Preserve visual buffer so terminal history survives restarts
+          buffer: pty.buffer,
+          scrollY: pty.scrollY,
+          rows: pty.rows,
+          cols: pty.cols,
+          // Reset cursor — new PTY has no output history to track
           cursor: undefined,
-          scrollY: undefined,
-          rows: undefined,
-          cols: undefined,
         })
         if (active) {
           setStore("active", clone.data.id)

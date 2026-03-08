@@ -97,13 +97,28 @@ export const { use: useFile, provider: FileProvider } = createSimpleContext({
       })
     }
 
+    // Track the previous scope so we can detect directory switches
+    let prevScope: string | undefined
     createEffect(() => {
-      scope()
+      const next = scope()
+      const switched = prevScope !== undefined && prevScope !== next
+      prevScope = next
+
+      // Cheap ops: clear immediately so no stale fetches are started
       inflight.clear()
       resetFileContentLru()
-      batch(() => {
-        setStore("file", reconcile({}))
-        tree.reset()
+
+      if (!switched) return
+
+      // Defer expensive store cleanup so the UI can paint the project switch first.
+      // reconcile({}) iterates every key and generates per-key reactive deletions —
+      // deferring prevents this O(n) work from blocking the navigation frame.
+      requestAnimationFrame(() => {
+        if (scope() !== next) return
+        batch(() => {
+          setStore("file", reconcile({}))
+          tree.reset()
+        })
       })
     })
 

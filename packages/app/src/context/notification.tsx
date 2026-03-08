@@ -31,7 +31,13 @@ type ErrorNotification = NotificationBase & {
   error: EventSessionError["properties"]["error"]
 }
 
-export type Notification = TurnCompleteNotification | ErrorNotification
+type ExternalNotification = NotificationBase & {
+  type: "external"
+  title?: string
+  body?: string
+}
+
+export type Notification = TurnCompleteNotification | ErrorNotification | ExternalNotification
 
 type NotificationIndex = {
   session: {
@@ -304,6 +310,17 @@ export const { use: useNotification, provider: NotificationProvider } = createSi
 
     return {
       ready,
+      appendExternal(opts: { directory?: string; session?: string; title?: string; body?: string }) {
+        append({
+          type: "external",
+          directory: opts.directory,
+          session: opts.session,
+          title: opts.title,
+          body: opts.body,
+          time: Date.now(),
+          viewed: false,
+        })
+      },
       session: {
         all(session: string) {
           return index.session.all[session] ?? empty

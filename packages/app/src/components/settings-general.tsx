@@ -339,6 +339,26 @@ export const SettingsGeneral: Component = () => {
     </div>
   )
 
+  const EditorSection = () => (
+    <div class="flex flex-col gap-1">
+      <h3 class="text-14-medium text-text-strong pb-2">{language.t("settings.general.section.editor")}</h3>
+
+      <div class="bg-surface-raised-base px-4 rounded-lg">
+        <SettingsRow
+          title={language.t("settings.general.row.autoSave.title")}
+          description={language.t("settings.general.row.autoSave.description")}
+        >
+          <div data-action="settings-editor-auto-save">
+            <Switch
+              checked={settings.general.autoSave()}
+              onChange={(checked) => settings.general.setAutoSave(checked)}
+            />
+          </div>
+        </SettingsRow>
+      </div>
+    </div>
+  )
+
   const NotificationsSection = () => (
     <div class="flex flex-col gap-1">
       <h3 class="text-14-medium text-text-strong pb-2">{language.t("settings.general.section.notifications")}</h3>
@@ -492,6 +512,8 @@ export const SettingsGeneral: Component = () => {
         <AppearanceSection />
 
         <FeedSection />
+
+        <EditorSection />
 
         <NotificationsSection />
 

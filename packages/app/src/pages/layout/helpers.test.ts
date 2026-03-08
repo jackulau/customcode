@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { type Session } from "@opencode-ai/sdk/v2/client"
-import { collectOpenProjectDeepLinks, drainPendingDeepLinks, parseDeepLink } from "./deep-links"
+import { collectOpenProjectDeepLinks, collectNotifyDeepLinks, drainPendingDeepLinks, parseDeepLink } from "./deep-links"
 import {
   displayName,
   errorMessage,
@@ -24,10 +24,13 @@ const session = (input: Partial<Session> & Pick<Session, "id" | "directory">) =>
 
 describe("layout deep links", () => {
   test("parses open-project deep links", () => {
-    expect(parseDeepLink("opencode://open-project?directory=/tmp/demo")).toBe("/tmp/demo")
+    expect(parseDeepLink("opencode://open-project?directory=/tmp/demo")).toEqual({
+      type: "open-project",
+      directory: "/tmp/demo",
+    })
   })
 
-  test("ignores non-project deep links", () => {
+  test("ignores unknown deep links", () => {
     expect(parseDeepLink("opencode://other?directory=/tmp/demo")).toBeUndefined()
     expect(parseDeepLink("https://example.com")).toBeUndefined()
   })
@@ -41,7 +44,10 @@ describe("layout deep links", () => {
     const original = Object.getOwnPropertyDescriptor(URL, "canParse")
     Object.defineProperty(URL, "canParse", { configurable: true, value: undefined })
     try {
-      expect(parseDeepLink("opencode://open-project?directory=/tmp/demo")).toBe("/tmp/demo")
+      expect(parseDeepLink("opencode://open-project?directory=/tmp/demo")).toEqual({
+        type: "open-project",
+        directory: "/tmp/demo",
+      })
     } finally {
       if (original) Object.defineProperty(URL, "canParse", original)
       if (!original) Reflect.deleteProperty(URL, "canParse")
@@ -56,10 +62,54 @@ describe("layout deep links", () => {
   test("collects only valid open-project directories", () => {
     const result = collectOpenProjectDeepLinks([
       "opencode://open-project?directory=/a",
-      "opencode://other?directory=/b",
+      "opencode://notify?title=hi",
       "opencode://open-project?directory=/c",
     ])
     expect(result).toEqual(["/a", "/c"])
+  })
+
+  test("parses notify deep links", () => {
+    expect(parseDeepLink("opencode://notify?title=Done&body=All+good&directory=/tmp/proj")).toEqual({
+      type: "notify",
+      title: "Done",
+      body: "All good",
+      directory: "/tmp/proj",
+      session: undefined,
+    })
+  })
+
+  test("parses notify deep links with session", () => {
+    expect(
+      parseDeepLink("opencode://notify?title=Done&directory=/tmp/proj&session=abc123"),
+    ).toEqual({
+      type: "notify",
+      title: "Done",
+      body: undefined,
+      directory: "/tmp/proj",
+      session: "abc123",
+    })
+  })
+
+  test("parses notify deep links with no params", () => {
+    expect(parseDeepLink("opencode://notify")).toEqual({
+      type: "notify",
+      title: undefined,
+      body: undefined,
+      directory: undefined,
+      session: undefined,
+    })
+  })
+
+  test("collects notify deep links", () => {
+    const result = collectNotifyDeepLinks([
+      "opencode://notify?title=A",
+      "opencode://open-project?directory=/b",
+      "opencode://notify?title=C&body=done",
+    ])
+    expect(result).toEqual([
+      { type: "notify", title: "A", body: undefined, directory: undefined, session: undefined },
+      { type: "notify", title: "C", body: "done", directory: undefined, session: undefined },
+    ])
   })
 
   test("drains global deep links once", () => {

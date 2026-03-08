@@ -125,7 +125,10 @@ export async function bootstrapDirectory(input: {
   unknownError: string
   invalidConfigurationError: string
 }) {
-  if (input.store.status !== "complete") input.setStore("status", "loading")
+  // Only set loading for brand-new stores. Partial/complete stores keep their
+  // status so the SyncProvider doesn't flash children during re-bootstrap.
+  if (input.store.status !== "complete" && input.store.status !== "partial")
+    input.setStore("status", "loading")
 
   const blockingRequests = {
     project: () => input.sdk.project.current().then((x) => input.setStore("project", x.data!.id)),

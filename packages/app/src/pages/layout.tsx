@@ -66,7 +66,13 @@ import {
   sortedRootSessions,
   workspaceKey,
 } from "./layout/helpers"
-import { collectOpenProjectDeepLinks, deepLinkEvent, drainPendingDeepLinks } from "./layout/deep-links"
+import {
+  collectOpenProjectDeepLinks,
+  collectNotifyDeepLinks,
+  deepLinkEvent,
+  drainPendingDeepLinks,
+  type DeepLink,
+} from "./layout/deep-links"
 import { createInlineEditorController } from "./layout/inline-editor"
 import {
   LocalWorkspace,
@@ -618,11 +624,15 @@ export default function Layout(props: ParentProps) {
     params.dir
     globalSDK.url
 
+    // Invalidate synchronously to stop in-flight prefetches, but clear
+    // queues in a microtask so this doesn't block the render pipeline.
     prefetchToken.value += 1
-    for (const q of prefetchQueues.values()) {
-      q.pending.length = 0
-      q.pendingSet.clear()
-    }
+    queueMicrotask(() => {
+      for (const q of prefetchQueues.values()) {
+        q.pending.length = 0
+        q.pendingSet.clear()
+      }
+    })
   })
 
   const queueFor = (directory: string) => {
@@ -1102,6 +1112,26 @@ export default function Layout(props: ParentProps) {
     let dirs = project
       ? effectiveWorkspaceOrder(root, [root, ...(project.sandboxes ?? [])], store.workspaceOrder[root])
       : [root]
+
+    // Fast path: navigate immediately using cached last session (no API calls)
+    const projectSession = store.lastProjectSession[root]
+    if (projectSession?.id && projectSession.directory) {
+      navigateWithSidebarReset(`/${base64Encode(projectSession.directory)}/session/${projectSession.id}`)
+      return
+    }
+
+    // Fast path: navigate using latest session from local store (no API calls)
+    const latest = latestRootSession(
+      dirs.map((item) => globalSync.child(item, { bootstrap: false })[0]),
+      Date.now(),
+    )
+    if (latest) {
+      setStore("lastProjectSession", root, { directory: latest.directory, id: latest.id, at: Date.now() })
+      navigateWithSidebarReset(`/${base64Encode(latest.directory)}/session/${latest.id}`)
+      return
+    }
+
+    // Slow path: fetch from server when no local data is available
     const canOpen = (value: string | undefined) => {
       if (!value) return false
       return dirs.some((item) => workspaceKey(item) === workspaceKey(value))
@@ -1114,34 +1144,6 @@ export default function Layout(props: ParentProps) {
         .catch(() => [] as string[])
       dirs = effectiveWorkspaceOrder(root, [root, ...listed], store.workspaceOrder[root])
       return canOpen(target)
-    }
-    const openSession = async (target: { directory: string; id: string }) => {
-      if (!canOpen(target.directory)) return false
-      const resolved = await globalSDK.client.session
-        .get({ sessionID: target.id })
-        .then((x) => x.data)
-        .catch(() => undefined)
-      if (!resolved?.directory) return false
-      if (!canOpen(resolved.directory)) return false
-      setStore("lastProjectSession", root, { directory: resolved.directory, id: resolved.id, at: Date.now() })
-      navigateWithSidebarReset(`/${base64Encode(resolved.directory)}/session/${resolved.id}`)
-      return true
-    }
-
-    const projectSession = store.lastProjectSession[root]
-    if (projectSession?.id) {
-      await refreshDirs(projectSession.directory)
-      const opened = await openSession(projectSession)
-      if (opened) return
-      clearLastProjectSession(root)
-    }
-
-    const latest = latestRootSession(
-      dirs.map((item) => globalSync.child(item, { bootstrap: false })[0]),
-      Date.now(),
-    )
-    if (latest && (await openSession(latest))) {
-      return
     }
 
     const fetched = latestRootSession(
@@ -1156,8 +1158,13 @@ export default function Layout(props: ParentProps) {
       ),
       Date.now(),
     )
-    if (fetched && (await openSession(fetched))) {
-      return
+    if (fetched) {
+      await refreshDirs(fetched.directory)
+      if (canOpen(fetched.directory)) {
+        setStore("lastProjectSession", root, { directory: fetched.directory, id: fetched.id, at: Date.now() })
+        navigateWithSidebarReset(`/${base64Encode(fetched.directory)}/session/${fetched.id}`)
+        return
+      }
     }
 
     navigateWithSidebarReset(`/${base64Encode(root)}/session`)
@@ -1173,10 +1180,49 @@ export default function Layout(props: ParentProps) {
     if (navigate) navigateToProject(directory)
   }
 
+  const handleNotifyDeepLink = (link: DeepLink & { type: "notify" }) => {
+    const title = link.title || language.t("notification.external.defaultTitle")
+    const body = link.body || undefined
+    let href: string | undefined
+    if (link.directory) {
+      const encoded = base64Encode(link.directory)
+      href = link.session ? `/${encoded}/session/${link.session}` : `/${encoded}`
+      openProject(link.directory, false)
+    }
+
+    notification.appendExternal({
+      directory: link.directory,
+      session: link.session,
+      title: link.title,
+      body: link.body,
+    })
+
+    const actions: { label: string; onClick: (() => void) | "dismiss" }[] = []
+    if (href) {
+      const target = href
+      actions.push({
+        label: language.t("notification.action.goToSession"),
+        onClick: () => navigate(target),
+      })
+    }
+    actions.push({ label: language.t("common.dismiss"), onClick: "dismiss" })
+    showToast({
+      persistent: true,
+      icon: "circle-check",
+      title,
+      description: body,
+      actions,
+    })
+  }
+
   const handleDeepLinks = (urls: string[]) => {
-    if (!server.isLocal()) return
-    for (const directory of collectOpenProjectDeepLinks(urls)) {
-      openProject(directory)
+    if (server.isLocal()) {
+      for (const directory of collectOpenProjectDeepLinks(urls)) {
+        openProject(directory)
+      }
+    }
+    for (const link of collectNotifyDeepLinks(urls)) {
+      handleNotifyDeepLink(link)
     }
   }
 
@@ -1585,16 +1631,19 @@ export default function Layout(props: ParentProps) {
           return
         }
 
+        // Defer session loading to next frame so it doesn't block the project switch render
         const next = new Set(dirs)
-        for (const directory of next) {
-          if (loadedSessionDirs.has(directory)) continue
-          globalSync.project.loadSessions(directory)
-        }
+        requestAnimationFrame(() => {
+          for (const directory of next) {
+            if (loadedSessionDirs.has(directory)) continue
+            globalSync.project.loadSessions(directory)
+          }
 
-        loadedSessionDirs.clear()
-        for (const directory of next) {
-          loadedSessionDirs.add(directory)
-        }
+          loadedSessionDirs.clear()
+          for (const directory of next) {
+            loadedSessionDirs.add(directory)
+          }
+        })
       },
       { defer: true },
     ),

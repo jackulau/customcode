@@ -175,12 +175,18 @@ export default function Page() {
   })
 
   createEffect(
-    on([() => sdk.directory, () => params.id] as const, ([, id]) => {
+    on([() => sdk.directory, () => params.id] as const, ([, id], prev) => {
       if (!id) return
-      untrack(() => {
-        void sync.session.sync(id)
-        void sync.session.todo(id)
-      })
+      const dirChanged = prev && prev[0] !== sdk.directory
+      const run = () => {
+        untrack(() => {
+          void sync.session.sync(id)
+          void sync.session.todo(id)
+        })
+      }
+      // Defer sync when switching directories so the UI paints first
+      if (dirChanged) requestAnimationFrame(run)
+      else run()
     }),
   )
 
@@ -188,8 +194,10 @@ export default function Page() {
   createEffect(
     on(
       () => sdk.directory,
-      () => {
-        void sync.workingDiff.fetch()
+      (dir, prev) => {
+        // Defer on directory switch to avoid blocking the render
+        if (prev) requestAnimationFrame(() => void sync.workingDiff.fetch())
+        else void sync.workingDiff.fetch()
       },
     ),
   )
@@ -587,31 +595,37 @@ export default function Page() {
     if (sync.status === "loading") return
 
     fileTreeTab()
-    const refresh = treeDir !== dir
+    const dirChanged = treeDir !== undefined && treeDir !== dir
     treeDir = dir
-    void (refresh ? file.tree.refresh("") : file.tree.list(""))
+    // Skip when directory just changed — the dedicated effect below handles
+    // initial tree loading on project switch to avoid duplicate API calls.
+    if (dirChanged) return
+    void file.tree.list("")
   })
 
   createEffect(
     on(
       () => sdk.directory,
       () => {
-        void file.tree.list("")
+        // Defer file operations on directory switch so the main UI paints first
+        requestAnimationFrame(() => {
+          void file.tree.list("")
 
-        const active = tabs().active()
-        if (!active) return
-        const path = file.pathFromTab(active)
-        if (!path) return
-        void file.load(path, { force: true })
+          const active = tabs().active()
+          if (!active) return
+          const path = file.pathFromTab(active)
+          if (!path) return
+          void file.load(path, { force: true })
+        })
       },
       { defer: true },
     ),
   )
 
   return (
-    <div class="relative bg-background-base size-full overflow-hidden flex flex-col">
+    <div class="relative bg-background-base size-full overflow-hidden flex flex-col contain-strict">
       <SessionHeader />
-      <div class="flex-1 min-h-0 flex">
+      <div class="flex-1 min-h-0 flex contain-strict">
         <SessionSidePanel reviewPanel={reviewPanel} activeDiff={tree.activeDiff} focusReviewDiff={focusReviewDiff} />
       </div>
       <TerminalPanel onSubmit={() => sync.workingDiff.schedule(500)} />

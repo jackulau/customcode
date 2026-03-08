@@ -10,6 +10,7 @@ import { sampledChecksum } from "@opencode-ai/util/encode"
 import { DropdownMenu } from "@opencode-ai/ui/dropdown-menu"
 import { Icon } from "@opencode-ai/ui/icon"
 import { IconButton } from "@opencode-ai/ui/icon-button"
+import { RadioGroup } from "@opencode-ai/ui/radio-group"
 import { Tabs } from "@opencode-ai/ui/tabs"
 import { ScrollView } from "@opencode-ai/ui/scroll-view"
 import { showToast } from "@opencode-ai/ui/toast"
@@ -19,7 +20,9 @@ import { useComments } from "@/context/comments"
 import { useLanguage } from "@/context/language"
 import { usePrompt } from "@/context/prompt"
 import { useSDK } from "@/context/sdk"
+import { useSettings } from "@/context/settings"
 import { getSessionHandoff } from "@/pages/session/handoff"
+import { CodeEditor } from "@/components/code-editor"
 
 function FileCommentMenu(props: {
   moreLabel: string
@@ -62,6 +65,7 @@ export function FileTabContent(props: { tab: string }) {
   const language = useLanguage()
   const prompt = usePrompt()
   const sdk = useSDK()
+  const settings = useSettings()
   const fileComponent = useFileComponent()
 
   const [editing, setEditing] = createSignal(false)
@@ -252,10 +256,10 @@ export function FileTabContent(props: { tab: string }) {
         find?.focus()
         return
       }
-      if (key === "s" && editing()) {
-        event.preventDefault()
-        event.stopPropagation()
-        void saveFile()
+      if (key === "s") {
+        if (!editing()) return
+        // Let CodeMirror handle Cmd+S when editing
+        return
       }
     }
 
@@ -402,22 +406,26 @@ export function FileTabContent(props: { tab: string }) {
   }
 
   const exitEditMode = () => {
+    // Clear any pending auto-save BEFORE clearing editContent —
+    // otherwise the timer fires with editContent="" and wipes the file.
+    clearTimeout(autoSaveTimer)
     setEditing(false)
     setEditContent("")
   }
 
-  const saveFile = async () => {
+  const saveFile = async (options?: { silent?: boolean }) => {
     const p = path()
     if (!p) return
     setSaving(true)
     try {
       await sdk.client.file.write({ path: p, content: editContent() })
       await file.load(p, { force: true })
-      exitEditMode()
-      showToast({
-        variant: "success",
-        title: language.t("toast.file.saved.title"),
-      })
+      if (!options?.silent) {
+        showToast({
+          variant: "success",
+          title: language.t("toast.file.saved.title"),
+        })
+      }
     } catch {
       showToast({
         variant: "error",
@@ -426,6 +434,33 @@ export function FileTabContent(props: { tab: string }) {
     } finally {
       setSaving(false)
     }
+  }
+
+  // Auto-save: debounce save when editing + autoSave is on
+  let autoSaveTimer: ReturnType<typeof setTimeout> | undefined
+  createEffect(() => {
+    if (!editing() || !settings.general.autoSave()) return
+    const content = editContent()
+    // Don't save if content matches the file (initial load or just-saved)
+    if (content === contents()) return
+    clearTimeout(autoSaveTimer)
+    autoSaveTimer = setTimeout(() => {
+      void saveFile({ silent: true })
+    }, 1000)
+  })
+  onCleanup(() => clearTimeout(autoSaveTimer))
+
+  type FileMode = "comment" | "edit"
+  const modeOptions: FileMode[] = ["comment", "edit"]
+  const modeLabels: Record<FileMode, () => string> = {
+    comment: () => language.t("fileTab.mode.comment"),
+    edit: () => language.t("fileTab.mode.edit"),
+  }
+  const currentMode = createMemo<FileMode>(() => (editing() ? "edit" : "comment"))
+  const onModeSelect = (mode: FileMode | undefined) => {
+    if (!mode) return
+    if (mode === "edit") enterEditMode()
+    else exitEditMode()
   }
 
   let prev = {
@@ -504,32 +539,25 @@ export function FileTabContent(props: { tab: string }) {
     <Tabs.Content value={props.tab} class="mt-3 relative h-full flex flex-col">
       <Show when={state()?.loaded && isEditable()}>
         <div class="flex items-center gap-2 px-4 pb-2 shrink-0">
-          <Show
-            when={editing()}
-            fallback={
-              <button
-                class="flex items-center gap-1.5 text-12-medium px-2.5 py-1 rounded-md text-text-secondary hover:text-text hover:bg-surface-raised-base transition-colors"
-                onClick={enterEditMode}
-              >
-                <Icon name="edit" size="small" />
-                {language.t("common.edit")}
-              </button>
-            }
-          >
+          <RadioGroup
+            options={modeOptions}
+            current={currentMode()}
+            value={(m) => m}
+            label={(m) => modeLabels[m]()}
+            onSelect={onModeSelect}
+            size="small"
+          />
+          <Show when={editing() && !settings.general.autoSave()}>
             <button
               class="text-12-medium px-2.5 py-1 rounded-md bg-surface-invert text-text-invert font-medium disabled:opacity-50"
               disabled={saving()}
-              onClick={saveFile}
+              onClick={() => saveFile()}
             >
               {saving() ? language.t("common.saving") : language.t("common.save")}
             </button>
-            <button
-              class="text-12-medium px-2.5 py-1 rounded-md text-text-secondary hover:text-text hover:bg-surface-raised-base transition-colors"
-              disabled={saving()}
-              onClick={exitEditMode}
-            >
-              {language.t("common.cancel")}
-            </button>
+          </Show>
+          <Show when={editing() && saving() && settings.general.autoSave()}>
+            <span class="text-12-regular text-text-weak">{language.t("common.saving")}</span>
           </Show>
         </div>
       </Show>
@@ -537,11 +565,12 @@ export function FileTabContent(props: { tab: string }) {
         when={!editing()}
         fallback={
           <div class="flex-1 min-h-0 overflow-auto">
-            <textarea
-              class="w-full h-full min-h-full bg-background-stronger text-text font-mono text-13 leading-5 px-6 py-2 resize-none outline-none border-none"
-              spellcheck={false}
+            <CodeEditor
               value={editContent()}
-              onInput={(e) => setEditContent(e.currentTarget.value)}
+              filename={path() ?? ""}
+              onChange={setEditContent}
+              onSave={() => saveFile()}
+              class="h-full"
             />
           </div>
         }

@@ -384,6 +384,19 @@ function createGlobalSync() {
     void bootstrap()
   })
 
+  // On wake from sleep, re-bootstrap global data and all active instances
+  // to recover from any events missed while the system was suspended.
+  if (typeof window !== "undefined") {
+    const handleWake = () => {
+      queue.refresh()
+      for (const directory of Object.keys(children.children)) {
+        queue.push(directory)
+      }
+    }
+    window.addEventListener("opencode:wake", handleWake)
+    onCleanup(() => window.removeEventListener("opencode:wake", handleWake))
+  }
+
   const projectApi = {
     loadSessions,
     meta(directory: string, patch: ProjectMeta) {

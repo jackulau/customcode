@@ -198,7 +198,26 @@ export const { use: useGlobalSDK, provider: GlobalSDKProvider } = createSimpleCo
       document.addEventListener("visibilitychange", onVisibility)
     }
 
+    // Wake-from-sleep detection: if a periodic timer fires with a large gap,
+    // the system was asleep. Force SSE reconnection and notify other components
+    // (terminals, global-sync) so they can refresh stale state.
+    const WAKE_CHECK_MS = 5_000
+    const WAKE_THRESHOLD_MS = 15_000
+    let lastWakeTick = Date.now()
+    const wakeTimer = setInterval(() => {
+      const now = Date.now()
+      const gap = now - lastWakeTick
+      lastWakeTick = now
+      if (gap > WAKE_THRESHOLD_MS) {
+        attempt?.abort()
+        if (typeof window !== "undefined") {
+          window.dispatchEvent(new Event("opencode:wake"))
+        }
+      }
+    }, WAKE_CHECK_MS)
+
     onCleanup(() => {
+      clearInterval(wakeTimer)
       if (typeof document !== "undefined") {
         document.removeEventListener("visibilitychange", onVisibility)
       }
