@@ -15,6 +15,7 @@ export type LocalPTY = {
   buffer?: string
   scrollY?: number
   cursor?: number
+  claudeSessionId?: string
 }
 
 const WORKSPACE_KEY = "__workspace__"

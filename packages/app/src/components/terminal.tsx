@@ -183,11 +183,29 @@ const useTerminalUiBindings = (input: {
   input.cleanups.push(() => input.term.textarea?.removeEventListener("blur", handleTextareaBlur))
 }
 
+/**
+ * Detect whether a startup command invokes the Claude CLI.
+ * Matches `claude` as a standalone command word (not `claude-something`).
+ */
+const isClaudeCommand = (cmd: string): boolean => /^claude(\s|$)/.test(cmd.trim())
+
+/** Returns true if the command already includes session/resume flags we should not override. */
+const hasClaudeSessionFlags = (cmd: string): boolean =>
+  /--(?:session-id|resume|continue)\b/.test(cmd) || /\s-[cr]\b/.test(cmd)
+
+/**
+ * Strip any existing --session-id or --resume flags from a Claude command
+ * so we can inject our own without duplicating them.
+ */
+const stripClaudeSessionFlags = (cmd: string): string =>
+  cmd.replace(/\s+--(?:session-id|resume)\s+\S+/g, "").trim()
+
 const persistTerminal = (input: {
   term: Term | undefined
   addon: SerializeAddon | undefined
   cursor: number
   pty: LocalPTY
+  claudeSessionId?: string
   onCleanup?: (pty: LocalPTY) => void
 }) => {
   if (!input.addon || !input.onCleanup || !input.term) return
@@ -207,6 +225,7 @@ const persistTerminal = (input: {
     rows: input.term.rows,
     cols: input.term.cols,
     scrollY: input.term.getViewportY(),
+    claudeSessionId: input.claudeSessionId,
   })
 }
 
@@ -220,6 +239,16 @@ export const Terminal = (props: TerminalProps) => {
   const server = useServer()
   let container!: HTMLDivElement
   const [local, others] = splitProps(props, ["pty", "class", "classList", "onConnect", "onConnectError"])
+
+  // Snapshot PTY identity at mount time. When <For> reuses a slot after a
+  // close/reorder, the reactive `local.pty` already reflects the replacement
+  // item by the time our cleanup runs — saving our buffer to the wrong entry.
+  const ptyAtMount: LocalPTY = {
+    id: local.pty.id,
+    title: local.pty.title,
+    titleNumber: local.pty.titleNumber,
+  }
+
   let ws: WebSocket | undefined
   let term: Term | undefined
   let ghostty: Ghostty
@@ -229,6 +258,7 @@ export const Terminal = (props: TerminalProps) => {
   let fitFrame: number | undefined
   let sizeTimer: ReturnType<typeof setTimeout> | undefined
   let pendingSize: { cols: number; rows: number } | undefined
+  let claudeSessionId: string | undefined = local.pty.claudeSessionId
   let lastSize: { cols: number; rows: number } | undefined
   let disposed = false
   const cleanups: VoidFunction[] = []
@@ -616,16 +646,43 @@ export const Terminal = (props: TerminalProps) => {
           local.onConnect?.()
           scheduleSize(t.cols, t.rows)
 
-          if (!restore && !startupSent) {
-            startupSent = true
+          if (!startupSent) {
             const cmd = settings.terminal.startupCommand()
-            if (cmd) {
+            const isClaude = cmd ? isClaudeCommand(cmd) : false
+            // Don't inject session flags if user already manages their own
+            const userManaged = isClaude && hasClaudeSessionFlags(cmd!)
+
+            if (!restore) {
+              // Normal first launch — send startup command
+              startupSent = true
+              if (cmd) {
+                let finalCmd = cmd
+                // If startup command is Claude CLI, inject --session-id for session tracking
+                if (isClaude && !userManaged && !claudeSessionId) {
+                  claudeSessionId = uuid()
+                  finalCmd = `${stripClaudeSessionFlags(cmd)} --session-id ${claudeSessionId}`
+                }
+                setTimeout(() => {
+                  if (disposed) return
+                  if (socket.readyState === WebSocket.OPEN) {
+                    socket.send(finalCmd + "\n")
+                  }
+                }, 50)
+              }
+            } else if (claudeSessionId && isClaude && !userManaged) {
+              // Restart with restored buffer — resume the Claude session
+              // Preserve original flags (e.g. --model, --permission-mode) from startup command
+              startupSent = true
+              const resumeCmd = `${stripClaudeSessionFlags(cmd!)} --resume ${claudeSessionId}`
               setTimeout(() => {
                 if (disposed) return
                 if (socket.readyState === WebSocket.OPEN) {
-                  socket.send(cmd + "\n")
+                  socket.send(resumeCmd + "\n")
                 }
               }, 50)
+            } else if (claudeSessionId && !isClaude) {
+              // Startup command changed away from Claude — clear stale session ID
+              claudeSessionId = undefined
             }
           }
         }
@@ -776,7 +833,7 @@ export const Terminal = (props: TerminalProps) => {
     const finalize = () => {
       if (finalized) return
       finalized = true
-      persistTerminal({ term, addon: serializeAddon, cursor, pty: local.pty, onCleanup: props.onCleanup })
+      persistTerminal({ term, addon: serializeAddon, cursor, pty: ptyAtMount, claudeSessionId, onCleanup: props.onCleanup })
       cleanup()
     }
 
