@@ -175,11 +175,18 @@ export function createWorkspaceTerminalSession(sdk: ReturnType<typeof useSDK>, d
         })
     },
     update(pty: Partial<LocalPTY> & { id: string }) {
+      // Find the entry by ID, not by position, to guard against index shifts
+      // caused by close/reorder happening between cleanup trigger and callback.
       const index = store.all.findIndex((x) => x.id === pty.id)
-      const previous = index >= 0 ? store.all[index] : undefined
-      if (index >= 0) {
-        setStore("all", index, (item) => ({ ...item, ...pty }))
+      if (index < 0) {
+        // PTY was already removed (e.g. tab closed) — skip the update entirely
+        // to prevent writing buffer data to a wrong or non-existent entry.
+        return
       }
+      const previous = store.all[index]
+      // Defensive invariant: the entry at the found index must match the requested ID.
+      if (previous.id !== pty.id) return
+      setStore("all", index, (item) => ({ ...item, ...pty }))
       sdk.client.pty
         .update({
           ptyID: pty.id,
