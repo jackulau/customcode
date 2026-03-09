@@ -18,7 +18,6 @@ export namespace Pty {
 
   type Socket = {
     readyState: number
-    data?: unknown
     send: (data: string | Uint8Array | ArrayBuffer) => void
     close: (code?: number, reason?: string) => void
   }
@@ -97,13 +96,14 @@ export namespace Pty {
         try {
           session.process.kill()
         } catch {}
-        for (const [key, ws] of session.subscribers.entries()) {
+        for (const ws of session.subscribers.values()) {
           try {
-            if (ws.data === key) ws.close()
+            ws.close()
           } catch {
             // ignore
           }
         }
+        session.subscribers.clear()
       }
       sessions.clear()
     },
@@ -176,11 +176,6 @@ export namespace Pty {
           continue
         }
 
-        if (ws.data !== key) {
-          session.subscribers.delete(key)
-          continue
-        }
-
         try {
           ws.send(chunk)
         } catch {
@@ -226,9 +221,9 @@ export namespace Pty {
     try {
       session.process.kill()
     } catch {}
-    for (const [key, ws] of session.subscribers.entries()) {
+    for (const ws of session.subscribers.values()) {
       try {
-        if (ws.data === key) ws.close()
+        ws.close()
       } catch {
         // ignore
       }
@@ -259,12 +254,14 @@ export namespace Pty {
     }
     log.info("client connected to session", { id })
 
-    // Use ws.data as the unique key for this connection lifecycle.
-    // If ws.data is undefined, fallback to ws object.
-    const connectionKey = ws.data && typeof ws.data === "object" ? ws.data : ws
+    // Use a unique per-connection object as the subscriber map key.
+    // Previously, ws.data was used as the key when it was an object,
+    // but that couples the key to runtime internals (e.g. hono/bun sets
+    // ws.data = { events, url, protocol }).  A dedicated sentinel is
+    // simpler, always unique, and avoids subtle bugs when ws.data is
+    // absent, a primitive, or reassigned.
+    const connectionKey = {}
 
-    // Optionally cleanup if the key somehow exists
-    session.subscribers.delete(connectionKey)
     session.subscribers.set(connectionKey, ws)
 
     const cleanup = () => {

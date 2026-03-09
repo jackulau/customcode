@@ -234,6 +234,9 @@ export function FileTabContent(props: { tab: string }) {
       if (target instanceof Node && current.contains(target)) return
 
       setTimeout(() => {
+        // Guard: if mode switched to edit while the timeout was pending,
+        // skip clearing the commenting state — enterEditMode already handled it.
+        if (editing()) return
         if (!document.activeElement || !current.contains(document.activeElement)) {
           setNote("commenting", null)
         }
@@ -251,6 +254,7 @@ export function FileTabContent(props: { tab: string }) {
 
       const key = event.key.toLowerCase()
       if (key === "f") {
+        if (editing()) return // Let CodeMirror handle Cmd+F when editing
         event.preventDefault()
         event.stopPropagation()
         find?.focus()
@@ -401,6 +405,10 @@ export function FileTabContent(props: { tab: string }) {
   })
 
   const enterEditMode = () => {
+    // Clear any open comment popover, active draft, or selection before entering edit mode
+    // to prevent stale comment UI state from lingering in memory during editing.
+    commentsUi.note.reset()
+    cancelCommenting()
     setEditContent(contents())
     setEditing(true)
   }
@@ -411,6 +419,10 @@ export function FileTabContent(props: { tab: string }) {
     clearTimeout(autoSaveTimer)
     setEditing(false)
     setEditContent("")
+    // Reset comment state so returning to comment mode starts fresh.
+    // This prevents stale selections (which may reference old line numbers
+    // after edits) from causing confusing UI when the comment view re-renders.
+    commentsUi.note.reset()
   }
 
   const saveFile = async (options?: { silent?: boolean }) => {

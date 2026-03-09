@@ -16,6 +16,7 @@ export type LocalPTY = {
   scrollY?: number
   cursor?: number
   claudeSessionId?: string
+  resumeSent?: boolean
 }
 
 const WORKSPACE_KEY = "__workspace__"
@@ -217,6 +218,9 @@ function createWorkspaceTerminalSession(sdk: ReturnType<typeof useSDK>, dir: str
           cols: pty.cols,
           // Reset cursor — new PTY has no output history to track
           cursor: undefined,
+          claudeSessionId: pty.claudeSessionId,
+          // Reset resumeSent — cloned PTY genuinely needs to resume
+          resumeSent: false,
         })
         if (active) {
           setStore("active", clone.data.id)

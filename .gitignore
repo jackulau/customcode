@@ -29,3 +29,7 @@ logs/
 *.bun-build
 tsconfig.tsbuildinfo
 .claude/worktrees/
+
+# Claude workspace (auto-added, never commit)
+.claude-workspace
+.claude/

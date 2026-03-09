@@ -105,3 +105,56 @@ describe("persist localStorage resilience", () => {
     expect(result).toBeUndefined()
   })
 })
+
+describe("workspace storage key uniqueness", () => {
+  test("different directories produce different storage keys", () => {
+    const dirs = [
+      "/Users/alice/project-a",
+      "/Users/alice/project-b",
+      "/Users/bob/project-a",
+      "/home/user/workspace",
+      "/tmp/test",
+    ]
+    const keys = dirs.map((dir) => persistTesting.workspaceStorage(dir))
+    const unique = new Set(keys)
+    expect(unique.size).toBe(dirs.length)
+  })
+
+  test("directories sharing a common prefix produce different keys", () => {
+    const keyA = persistTesting.workspaceStorage("/Users/alice/projects/alpha")
+    const keyB = persistTesting.workspaceStorage("/Users/alice/projects/beta")
+    expect(keyA).not.toBe(keyB)
+  })
+
+  test("same directory always produces the same key", () => {
+    const dir = "/Users/alice/my-project"
+    const key1 = persistTesting.workspaceStorage(dir)
+    const key2 = persistTesting.workspaceStorage(dir)
+    expect(key1).toBe(key2)
+  })
+
+  test("empty directory uses fallback head", () => {
+    const key = persistTesting.workspaceStorage("")
+    expect(key).toContain("workspace")
+  })
+
+  test("storage key format is valid", () => {
+    const key = persistTesting.workspaceStorage("/Users/alice/project")
+    expect(key).toMatch(/^opencode\.workspace\..+\..+\.dat$/)
+  })
+
+  test("directories differing only by trailing slash produce different keys", () => {
+    const keyA = persistTesting.workspaceStorage("/Users/alice/project")
+    const keyB = persistTesting.workspaceStorage("/Users/alice/project/")
+    // These should differ because the full path differs (checksum is of the whole string)
+    expect(keyA).not.toBe(keyB)
+  })
+
+  test("large batch of similar directories does not produce collisions", () => {
+    // Generate 200 similar directory paths to verify no collisions in a realistic scenario
+    const dirs = Array.from({ length: 200 }, (_, i) => `/Users/alice/projects/project-${i}`)
+    const keys = dirs.map((dir) => persistTesting.workspaceStorage(dir))
+    const unique = new Set(keys)
+    expect(unique.size).toBe(dirs.length)
+  })
+})

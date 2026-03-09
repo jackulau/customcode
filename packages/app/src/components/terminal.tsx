@@ -206,6 +206,7 @@ const persistTerminal = (input: {
   cursor: number
   pty: LocalPTY
   claudeSessionId?: string
+  resumeSent?: boolean
   onCleanup?: (pty: LocalPTY) => void
 }) => {
   if (!input.addon || !input.onCleanup || !input.term) return
@@ -226,6 +227,7 @@ const persistTerminal = (input: {
     cols: input.term.cols,
     scrollY: input.term.getViewportY(),
     claudeSessionId: input.claudeSessionId,
+    resumeSent: input.resumeSent,
   })
 }
 
@@ -259,6 +261,10 @@ export const Terminal = (props: TerminalProps) => {
   let sizeTimer: ReturnType<typeof setTimeout> | undefined
   let pendingSize: { cols: number; rows: number } | undefined
   let claudeSessionId: string | undefined = local.pty.claudeSessionId
+  // Track whether resume command has been sent across mount/unmount cycles.
+  // Initialized from persisted state so panel toggles don't re-send resume.
+  // Reset to false in clone() when the PTY genuinely needs to resume.
+  let resumeSent: boolean = !!local.pty.resumeSent
   let lastSize: { cols: number; rows: number } | undefined
   let disposed = false
   const cleanups: VoidFunction[] = []
@@ -669,10 +675,11 @@ export const Terminal = (props: TerminalProps) => {
                   }
                 }, 50)
               }
-            } else if (claudeSessionId && isClaude && !userManaged) {
+            } else if (claudeSessionId && isClaude && !userManaged && !resumeSent) {
               // Restart with restored buffer — resume the Claude session
               // Preserve original flags (e.g. --model, --permission-mode) from startup command
               startupSent = true
+              resumeSent = true
               const resumeCmd = `${stripClaudeSessionFlags(cmd!)} --resume ${claudeSessionId}`
               setTimeout(() => {
                 if (disposed) return
@@ -686,8 +693,14 @@ export const Terminal = (props: TerminalProps) => {
             }
           }
         }
-        socket.addEventListener("open", handleOpen)
-        if (socket.readyState === WebSocket.OPEN) handleOpen()
+        // Check readyState before attaching the listener to prevent double execution:
+        // if the socket is already OPEN when we attach, both the synchronous call
+        // and the queued event listener callback would fire.
+        if (socket.readyState === WebSocket.OPEN) {
+          handleOpen()
+        } else {
+          socket.addEventListener("open", handleOpen)
+        }
 
         const handleMessage = (event: MessageEvent) => {
           if (disposed) return
@@ -833,7 +846,7 @@ export const Terminal = (props: TerminalProps) => {
     const finalize = () => {
       if (finalized) return
       finalized = true
-      persistTerminal({ term, addon: serializeAddon, cursor, pty: ptyAtMount, claudeSessionId, onCleanup: props.onCleanup })
+      persistTerminal({ term, addon: serializeAddon, cursor, pty: ptyAtMount, claudeSessionId, resumeSent, onCleanup: props.onCleanup })
       cleanup()
     }
 
