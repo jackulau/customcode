@@ -83,7 +83,7 @@ describe("CodeEditor focus and state", () => {
   })
 
   test("no dispatch when content matches (typing loop prevention)", () => {
-    const onChange = mock(() => {})
+    const onChange = mock((_doc: string) => {})
 
     view = new EditorView({
       state: EditorState.create({
