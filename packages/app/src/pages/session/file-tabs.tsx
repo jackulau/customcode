@@ -23,6 +23,7 @@ import { useSDK } from "@/context/sdk"
 import { useSettings } from "@/context/settings"
 import { getSessionHandoff } from "@/pages/session/handoff"
 import { CodeEditor } from "@/components/code-editor"
+import { buildLineMapping } from "@/utils/line-mapping"
 
 function FileCommentMenu(props: {
   moreLabel: string
@@ -71,6 +72,10 @@ export function FileTabContent(props: { tab: string }) {
   const [editing, setEditing] = createSignal(false)
   const [editContent, setEditContent] = createSignal("")
   const [saving, setSaving] = createSignal(false)
+
+  // Snapshot of file content when entering edit mode, used to compute
+  // line-level changes for comment position reconciliation after save.
+  let contentBeforeEdit = ""
 
   const sessionKey = createMemo(() => `${params.dir}${params.id ? "/" + params.id : ""}`)
   const tabs = createMemo(() => layout.tabs(sessionKey))
@@ -162,6 +167,59 @@ export function FileTabContent(props: { tab: string }) {
   const removeCommentFromContext = (input: { id: string; file: string }) => {
     comments.remove(input.file, input.id)
     prompt.context.removeComment(input.file, input.id)
+  }
+
+  /**
+   * Reconcile comment positions after a file edit.
+   * Compares the old content snapshot with the new content, computes a line
+   * mapping, and updates all comments for this file. Deleted comments are
+   * removed from both the comment store and prompt context. Updated comments
+   * have their prompt context items refreshed with the new selection and preview.
+   */
+  const reconcileCommentPositions = (filePath: string, oldContent: string, newContent: string) => {
+    if (oldContent === newContent) return
+
+    const fileCommentsForPath = comments.list(filePath)
+    if (fileCommentsForPath.length === 0) return
+
+    const mapLine = buildLineMapping(oldContent, newContent)
+    const result = comments.updatePositions(filePath, mapLine)
+
+    // Remove prompt context items for deleted comments
+    for (const id of result.deleted) {
+      prompt.context.removeComment(filePath, id)
+    }
+
+    // Update prompt context items for repositioned comments
+    for (const entry of result.updated) {
+      const selection = selectionFromLines(entry.selection)
+      const preview = previewSelectedLines(newContent, {
+        start: selection.startLine,
+        end: selection.endLine,
+      })
+      prompt.context.updateComment(filePath, entry.id, {
+        selection,
+        ...(preview ? { preview } : {}),
+      })
+    }
+
+    // Notify the user if any comments were affected
+    const affected = result.updated.length + result.deleted.length
+    if (affected > 0) {
+      if (result.deleted.length > 0) {
+        showToast({
+          variant: "default",
+          title: language.t("toast.file.commentsUpdated.title"),
+          description: language.t("toast.file.commentsUpdated.deleted.description"),
+        })
+      } else {
+        showToast({
+          variant: "default",
+          title: language.t("toast.file.commentsUpdated.title"),
+          description: language.t("toast.file.commentsUpdated.repositioned.description"),
+        })
+      }
+    }
   }
 
   const fileComments = createMemo(() => {
@@ -409,7 +467,8 @@ export function FileTabContent(props: { tab: string }) {
     // to prevent stale comment UI state from lingering in memory during editing.
     commentsUi.note.reset()
     cancelCommenting()
-    setEditContent(contents())
+    contentBeforeEdit = contents()
+    setEditContent(contentBeforeEdit)
     setEditing(true)
   }
 
@@ -417,6 +476,16 @@ export function FileTabContent(props: { tab: string }) {
     // Clear any pending auto-save BEFORE clearing editContent —
     // otherwise the timer fires with editContent="" and wipes the file.
     clearTimeout(autoSaveTimer)
+
+    // Reconcile comment positions before leaving edit mode.
+    // Use the current file contents (which reflect all saves during the edit
+    // session) compared to the snapshot taken when entering edit mode.
+    const p = path()
+    if (p && contentBeforeEdit) {
+      reconcileCommentPositions(p, contentBeforeEdit, contents())
+    }
+    contentBeforeEdit = ""
+
     setEditing(false)
     setEditContent("")
     // Reset comment state so returning to comment mode starts fresh.
