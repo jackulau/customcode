@@ -5,6 +5,7 @@ import { useParams } from "@solidjs/router"
 import { Persist, persisted } from "@/utils/persist"
 import { createScopedCache } from "@/utils/scoped-cache"
 import { uuid } from "@/utils/uuid"
+import { reconcileSelection, type MappedLine } from "@/utils/line-mapping"
 import type { SelectedLineRange } from "@/context/file"
 
 export type LineComment = {
@@ -16,6 +17,11 @@ export type LineComment = {
 }
 
 type CommentFocus = { file: string; id: string }
+
+export type PositionUpdateResult = {
+  updated: { id: string; selection: SelectedLineRange }[]
+  deleted: string[]
+}
 
 const WORKSPACE_KEY = "__workspace__"
 const MAX_COMMENT_SESSIONS = 20
@@ -144,6 +150,43 @@ function createCommentSessionState(store: Store<CommentStore>, setStore: SetStor
     })
   }
 
+  const updatePositions = (
+    file: string,
+    mapLine: (oldLine: number) => MappedLine,
+  ): PositionUpdateResult => {
+    const items = store.comments[file] ?? []
+    if (items.length === 0) return { updated: [], deleted: [] }
+
+    const result: PositionUpdateResult = { updated: [], deleted: [] }
+    const nextItems: LineComment[] = []
+
+    for (const item of items) {
+      const reconciled = reconcileSelection(item.selection, mapLine)
+      if (reconciled.type === "deleted") {
+        result.deleted.push(item.id)
+      } else {
+        const next = { ...item, selection: reconciled.selection }
+        nextItems.push(next)
+        if (reconciled.type === "updated") {
+          result.updated.push({ id: item.id, selection: reconciled.selection })
+        }
+      }
+    }
+
+    if (result.updated.length > 0 || result.deleted.length > 0) {
+      batch(() => {
+        setStore("comments", file, nextItems)
+        // Clear focus/active if they point to a deleted comment
+        for (const id of result.deleted) {
+          setFocus((current) => (current?.file === file && current.id === id ? null : current))
+          setActive((current) => (current?.file === file && current.id === id ? null : current))
+        }
+      })
+    }
+
+    return result
+  }
+
   return {
     list,
     all,
@@ -152,6 +195,7 @@ function createCommentSessionState(store: Store<CommentStore>, setStore: SetStor
     update,
     replace,
     clear,
+    updatePositions,
     focus: () => state.focus,
     setFocus,
     clearFocus: () => setRef("focus", null),
@@ -186,6 +230,7 @@ function createCommentSession(dir: string, id: string | undefined) {
     update: session.update,
     replace: session.replace,
     clear: session.clear,
+    updatePositions: session.updatePositions,
     focus: session.focus,
     setFocus: session.setFocus,
     clearFocus: session.clearFocus,
@@ -232,6 +277,8 @@ export const { use: useComments, provider: CommentsProvider } = createSimpleCont
       update: (file: string, id: string, comment: string) => session().update(file, id, comment),
       replace: (comments: LineComment[]) => session().replace(comments),
       clear: () => session().clear(),
+      updatePositions: (file: string, mapLine: (oldLine: number) => MappedLine) =>
+        session().updatePositions(file, mapLine),
       focus: () => session().focus(),
       setFocus: (focus: CommentFocus | null) => session().setFocus(focus),
       clearFocus: () => session().clearFocus(),

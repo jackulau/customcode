@@ -428,6 +428,10 @@ export const dict = {
   "toast.file.listFailed.title": "Failed to list files",
   "toast.file.saved.title": "File saved",
   "toast.file.saveFailed.title": "Failed to save file",
+  "toast.file.commentsUpdated.title": "Comments updated",
+  "toast.file.commentsUpdated.repositioned.description": "Comment positions were adjusted to match edited lines.",
+  "toast.file.commentsUpdated.deleted.description":
+    "Some comments were removed because their referenced lines were deleted.",
 
   "toast.context.noLineSelection.title": "No line selection",
   "toast.context.noLineSelection.description": "Select a line range in a file tab first.",
