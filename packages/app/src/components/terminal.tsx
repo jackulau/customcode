@@ -465,7 +465,14 @@ export const Terminal = (props: TerminalProps) => {
       const mod = loaded.mod
       const g = loaded.ghostty
 
-      const restore = typeof local.pty.buffer === "string" ? local.pty.buffer : ""
+      // Validate buffer belongs to this PTY: only restore if we have a matching
+      // cursor (indicates the buffer was saved from this PTY's session). A buffer
+      // without a valid cursor may have been misassigned from another terminal.
+      const hasValidCursor = typeof local.pty.cursor === "number" && Number.isSafeInteger(local.pty.cursor)
+      const restore = typeof local.pty.buffer === "string" && (hasValidCursor || !local.pty.cursor) ? local.pty.buffer : ""
+      if (typeof local.pty.buffer === "string" && !restore) {
+        debugTerminal("discarded buffer for PTY", local.pty.id, "— cursor validation failed")
+      }
       const restoreSize =
         restore &&
         typeof local.pty.cols === "number" &&
@@ -588,8 +595,21 @@ export const Terminal = (props: TerminalProps) => {
           output.flush(resolve)
         })
 
+      // When restoring a buffer, keep the container hidden until the WebSocket
+      // connection succeeds. This prevents a brief flash of stale content if the
+      // PTY is dead and the buffer gets cleared before clone.
+      let revealPending = false
+      const revealTerminal = () => {
+        if (!revealPending) return
+        revealPending = false
+        requestAnimationFrame(() => {
+          if (!disposed) container.style.visibility = ""
+        })
+      }
+
       if (restore && restoreSize) {
         container.style.visibility = "hidden"
+        revealPending = true
         try {
           await write(restore)
         } catch (err) {
@@ -600,21 +620,22 @@ export const Terminal = (props: TerminalProps) => {
         scheduleSize(t.cols, t.rows)
         if (typeof local.pty.scrollY === "number") t.scrollToLine(local.pty.scrollY)
         startResize()
-        requestAnimationFrame(() => {
-          if (!disposed) container.style.visibility = ""
-        })
+      } else if (restore) {
+        container.style.visibility = "hidden"
+        revealPending = true
+        fit.fit()
+        scheduleSize(t.cols, t.rows)
+        try {
+          await write(restore)
+        } catch (err) {
+          debugTerminal("failed to restore terminal buffer", err)
+          t.clear()
+        }
+        if (typeof local.pty.scrollY === "number") t.scrollToLine(local.pty.scrollY)
+        startResize()
       } else {
         fit.fit()
         scheduleSize(t.cols, t.rows)
-        if (restore) {
-          try {
-            await write(restore)
-          } catch (err) {
-            debugTerminal("failed to restore terminal buffer", err)
-            t.clear()
-          }
-          if (typeof local.pty.scrollY === "number") t.scrollToLine(local.pty.scrollY)
-        }
         startResize()
       }
 
@@ -672,6 +693,8 @@ export const Terminal = (props: TerminalProps) => {
         const handleOpen = () => {
           hasEverConnected = true
           reconnectDelay = 1000
+          // Connection succeeded — safe to show the restored buffer
+          revealTerminal()
           local.onConnect?.()
           scheduleSize(t.cols, t.rows)
 
@@ -739,6 +762,19 @@ export const Terminal = (props: TerminalProps) => {
               const meta = JSON.parse(json) as { cursor?: unknown }
               const next = meta?.cursor
               if (typeof next === "number" && Number.isSafeInteger(next) && next >= 0) {
+                // Validate monotonic cursor: a backward jump indicates
+                // the server buffer was reset (e.g. server restart) or
+                // a session mismatch. Log for debugging but trust the server.
+                if (next < cursor) {
+                  debugTerminal(
+                    "cursor jumped backward:",
+                    cursor,
+                    "->",
+                    next,
+                    "for PTY",
+                    local.pty.id,
+                  )
+                }
                 cursor = next
               }
             } catch (err) {
@@ -769,8 +805,14 @@ export const Terminal = (props: TerminalProps) => {
           // Normal closure (code 1000) means PTY process exited
           if (event.code === 1000) return
 
-          // Never connected (e.g. stale PTY after restart) — skip retries
+          // Never connected (e.g. stale PTY after restart) — skip retries.
+          // Clear the terminal immediately so stale buffer content is not
+          // visible while the error handler (e.g. clone) processes.
           if (!hasEverConnected) {
+            t.clear()
+            // Reveal the (now empty) terminal — the error handler will
+            // typically clone a new PTY that remounts this component.
+            revealTerminal()
             local.onConnectError?.(new Error("PTY not found on server"))
             return
           }
