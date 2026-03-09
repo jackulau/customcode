@@ -224,6 +224,11 @@ export function CodeEditor(props: {
       }),
       parent: container,
     })
+    // Auto-focus so the cursor is immediately visible and blinking
+    // Use requestAnimationFrame to ensure the DOM is fully laid out
+    requestAnimationFrame(() => {
+      view?.focus()
+    })
   })
 
   createEffect(
@@ -233,8 +238,13 @@ export function CodeEditor(props: {
         if (!view) return
         const current = view.state.doc.toString()
         if (current !== value) {
+          // External value change (e.g., tab switch) — update content and re-focus
           view.dispatch({
             changes: { from: 0, to: current.length, insert: value },
+          })
+          // Re-focus after external content swap so the cursor stays active
+          requestAnimationFrame(() => {
+            view?.focus()
           })
         }
       },
