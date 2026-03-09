@@ -170,11 +170,18 @@ function createWorkspaceTerminalSession(sdk: ReturnType<typeof useSDK>, dir: str
         })
     },
     update(pty: Partial<LocalPTY> & { id: string }) {
+      // Find the entry by ID, not by position, to guard against index shifts
+      // caused by close/reorder happening between cleanup trigger and callback.
       const index = store.all.findIndex((x) => x.id === pty.id)
-      const previous = index >= 0 ? store.all[index] : undefined
-      if (index >= 0) {
-        setStore("all", index, (item) => ({ ...item, ...pty }))
+      if (index < 0) {
+        // PTY was already removed (e.g. tab closed) — skip the update entirely
+        // to prevent writing buffer data to a wrong or non-existent entry.
+        return
       }
+      const previous = store.all[index]
+      // Defensive invariant: the entry at the found index must match the requested ID.
+      if (previous.id !== pty.id) return
+      setStore("all", index, (item) => ({ ...item, ...pty }))
       sdk.client.pty
         .update({
           ptyID: pty.id,
@@ -193,6 +200,10 @@ function createWorkspaceTerminalSession(sdk: ReturnType<typeof useSDK>, dir: str
       const index = store.all.findIndex((x) => x.id === id)
       const pty = store.all[index]
       if (!pty) return
+      // Validate that the PTY at this index is the one we intend to clone.
+      // If the store was mutated (close/reorder) between the call and the await,
+      // the index may now point to a different entry.
+      if (pty.id !== id) return
       const clone = await sdk.client.pty
         .create({
           title: pty.title,
@@ -203,20 +214,31 @@ function createWorkspaceTerminalSession(sdk: ReturnType<typeof useSDK>, dir: str
         })
       if (!clone?.data) return
 
-      const active = store.active === pty.id
+      // Re-validate after the async gap: the store may have changed while
+      // we awaited the server call, so re-lookup by ID, not stale index.
+      const currentIndex = store.all.findIndex((x) => x.id === id)
+      const currentPty = currentIndex >= 0 ? store.all[currentIndex] : undefined
+      if (!currentPty || currentPty.id !== id) {
+        // The original PTY was removed during the await — nothing to clone into
+        return
+      }
+
+      const active = store.active === currentPty.id
 
       batch(() => {
-        setStore("all", index, {
+        setStore("all", currentIndex, {
           id: clone.data.id,
-          title: clone.data.title ?? pty.title,
-          titleNumber: pty.titleNumber,
-          // Preserve visual buffer so terminal history survives restarts
-          buffer: pty.buffer,
-          scrollY: pty.scrollY,
-          rows: pty.rows,
-          cols: pty.cols,
+          title: clone.data.title ?? currentPty.title,
+          titleNumber: currentPty.titleNumber,
+          // Preserve visual buffer so terminal history survives restarts.
+          // The buffer belongs to `currentPty` (verified by ID match above).
+          buffer: currentPty.buffer,
+          scrollY: currentPty.scrollY,
+          rows: currentPty.rows,
+          cols: currentPty.cols,
           // Reset cursor — new PTY has no output history to track
           cursor: undefined,
+          claudeSessionId: currentPty.claudeSessionId,
         })
         if (active) {
           setStore("active", clone.data.id)

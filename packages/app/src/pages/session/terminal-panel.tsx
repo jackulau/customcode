@@ -234,6 +234,7 @@ export function TerminalPanel(props: { onSubmit?: () => void }) {
                           onSubmit={props.onSubmit}
                           onCleanup={terminal.update}
                           onConnectError={() => terminal.clone(pty.id)}
+                          allPtys={all}
                         />
                       </Show>
                     </div>

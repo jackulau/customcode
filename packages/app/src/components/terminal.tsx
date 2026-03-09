@@ -23,6 +23,8 @@ export interface TerminalProps extends ComponentProps<"div"> {
   onCleanup?: (pty: LocalPTY) => void
   onConnect?: () => void
   onConnectError?: (error: unknown) => void
+  /** Accessor returning the current list of all PTYs — used to validate ownership during persistence */
+  allPtys?: () => readonly LocalPTY[]
 }
 
 let shared: Promise<{ mod: typeof import("ghostty-web"); ghostty: Ghostty }> | undefined
@@ -200,15 +202,36 @@ const hasClaudeSessionFlags = (cmd: string): boolean =>
 const stripClaudeSessionFlags = (cmd: string): string =>
   cmd.replace(/\s+--(?:session-id|resume)\s+\S+/g, "").trim()
 
-const persistTerminal = (input: {
+/**
+ * Persist terminal buffer to the store on cleanup. Exported for testing.
+ *
+ * Before writing, validates that the PTY ID still exists in the terminal store
+ * to prevent buffer data from being saved to the wrong entry. This guards
+ * against race conditions where a terminal is closed or reordered between
+ * the time `onCleanup` fires and the persistence callback runs.
+ */
+export const persistTerminal = (input: {
   term: Term | undefined
   addon: SerializeAddon | undefined
   cursor: number
   pty: LocalPTY
   claudeSessionId?: string
   onCleanup?: (pty: LocalPTY) => void
+  /** Current list of all PTYs in the store — used to validate the PTY still exists */
+  allPtys?: readonly LocalPTY[]
 }) => {
   if (!input.addon || !input.onCleanup || !input.term) return
+
+  // Guard: skip persistence if the PTY was removed from the store while cleanup
+  // was pending (e.g., the tab was closed and the store entry already spliced out).
+  if (input.allPtys) {
+    const exists = input.allPtys.some((p) => p.id === input.pty.id)
+    if (!exists) {
+      debugTerminal("skipping persist — PTY", input.pty.id, "no longer in store")
+      return
+    }
+  }
+
   const buffer = (() => {
     try {
       return input.addon.serialize()
@@ -238,7 +261,7 @@ export const Terminal = (props: TerminalProps) => {
   const language = useLanguage()
   const server = useServer()
   let container!: HTMLDivElement
-  const [local, others] = splitProps(props, ["pty", "class", "classList", "onConnect", "onConnectError"])
+  const [local, others] = splitProps(props, ["pty", "class", "classList", "onConnect", "onConnectError", "allPtys"])
 
   // Snapshot PTY identity at mount time. When <For> reuses a slot after a
   // close/reorder, the reactive `local.pty` already reflects the replacement
@@ -833,7 +856,7 @@ export const Terminal = (props: TerminalProps) => {
     const finalize = () => {
       if (finalized) return
       finalized = true
-      persistTerminal({ term, addon: serializeAddon, cursor, pty: ptyAtMount, claudeSessionId, onCleanup: props.onCleanup })
+      persistTerminal({ term, addon: serializeAddon, cursor, pty: ptyAtMount, claudeSessionId, onCleanup: props.onCleanup, allPtys: local.allPtys?.() })
       cleanup()
     }
 
