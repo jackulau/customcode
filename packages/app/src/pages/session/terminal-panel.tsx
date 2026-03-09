@@ -233,7 +233,17 @@ export function TerminalPanel(props: { onSubmit?: () => void }) {
                           pty={pty}
                           onSubmit={props.onSubmit}
                           onCleanup={terminal.update}
-                          onConnectError={() => terminal.clone(pty.id)}
+                          onConnectError={() => {
+                            // Clear stale buffer from the store before cloning so
+                            // the new terminal doesn't inherit wrong content.
+                            terminal.update({
+                              id: pty.id,
+                              buffer: undefined,
+                              cursor: undefined,
+                              scrollY: undefined,
+                            })
+                            terminal.clone(pty.id)
+                          }}
                         />
                       </Show>
                     </div>
