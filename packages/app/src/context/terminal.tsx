@@ -60,7 +60,8 @@ export function clearWorkspaceTerminals(dir: string, sessionIDs?: string[], plat
   }
 }
 
-function createWorkspaceTerminalSession(sdk: ReturnType<typeof useSDK>, dir: string, legacySessionID?: string) {
+/** @internal Exported for testing only */
+export function createWorkspaceTerminalSession(sdk: ReturnType<typeof useSDK>, dir: string, legacySessionID?: string) {
   const legacy = getLegacyTerminalStorageKeys(dir, legacySessionID)
 
   const numberFromTitle = (title: string) => {
@@ -119,6 +120,9 @@ function createWorkspaceTerminalSession(sdk: ReturnType<typeof useSDK>, dir: str
     removeExited(event.properties.id)
   })
   onCleanup(unsub)
+
+  // Track PTY IDs currently being cloned to prevent concurrent clones racing
+  const cloningPtyIds = new Set<string>()
 
   const meta = { migrated: false }
 
@@ -191,41 +195,65 @@ function createWorkspaceTerminalSession(sdk: ReturnType<typeof useSDK>, dir: str
         })
     },
     async clone(id: string) {
-      const index = store.all.findIndex((x) => x.id === id)
-      const pty = store.all[index]
-      if (!pty) return
-      const clone = await sdk.client.pty
-        .create({
-          title: pty.title,
-        })
-        .catch((error: unknown) => {
-          console.error("Failed to clone terminal", error)
-          return undefined
-        })
-      if (!clone?.data) return
+      // Prevent concurrent clones for the same PTY from racing
+      if (cloningPtyIds.has(id)) return
+      cloningPtyIds.add(id)
+      try {
+        const pty = store.all.find((x) => x.id === id)
+        if (!pty) return
 
-      const active = store.active === pty.id
+        // Capture metadata before the async gap — title and layout survive
+        const title = pty.title
+        const titleNumber = pty.titleNumber
+        const rows = pty.rows
+        const cols = pty.cols
+        const claudeSessionId = pty.claudeSessionId
 
-      batch(() => {
-        setStore("all", index, {
-          id: clone.data.id,
-          title: clone.data.title ?? pty.title,
-          titleNumber: pty.titleNumber,
-          // Preserve visual buffer so terminal history survives restarts
-          buffer: pty.buffer,
-          scrollY: pty.scrollY,
-          rows: pty.rows,
-          cols: pty.cols,
-          // Reset cursor — new PTY has no output history to track
-          cursor: undefined,
-          claudeSessionId: pty.claudeSessionId,
-          // Reset resumeSent — cloned PTY genuinely needs to resume
-          resumeSent: false,
-        })
-        if (active) {
-          setStore("active", clone.data.id)
+        const clone = await sdk.client.pty
+          .create({
+            title,
+          })
+          .catch((error: unknown) => {
+            console.error("Failed to clone terminal", error)
+            return undefined
+          })
+        if (!clone?.data) return
+
+        // Re-lookup by the original ID after the async gap since array indices
+        // may have shifted if other terminals were added/removed/cloned concurrently
+        const currentIndex = store.all.findIndex((x) => x.id === id)
+        if (currentIndex === -1) {
+          // Entry was already removed or replaced by another clone — bail out
+          return
         }
-      })
+
+        const isActive = store.active === id
+
+        batch(() => {
+          setStore("all", currentIndex, {
+            id: clone.data.id,
+            title: clone.data.title ?? title,
+            titleNumber,
+            // Do NOT copy the old buffer — the clone is triggered because the old
+            // PTY no longer exists on the server. The buffer may be from a completely
+            // different session if persistence was corrupted. Start fresh.
+            buffer: undefined,
+            scrollY: undefined,
+            rows,
+            cols,
+            // Reset cursor — new PTY has no output history to track
+            cursor: undefined,
+            claudeSessionId,
+            // Reset resumeSent — cloned PTY genuinely needs to resume
+            resumeSent: false,
+          })
+          if (isActive) {
+            setStore("active", clone.data.id)
+          }
+        })
+      } finally {
+        cloningPtyIds.delete(id)
+      }
     },
     open(id: string) {
       setStore("active", id)
