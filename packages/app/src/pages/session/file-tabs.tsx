@@ -438,6 +438,7 @@ export function FileTabContent(props: { tab: string }) {
 
   // Auto-save: debounce save when editing + autoSave is on
   let autoSaveTimer: ReturnType<typeof setTimeout> | undefined
+  let disposed = false
   createEffect(() => {
     if (!editing() || !settings.general.autoSave()) return
     const content = editContent()
@@ -445,10 +446,15 @@ export function FileTabContent(props: { tab: string }) {
     if (content === contents()) return
     clearTimeout(autoSaveTimer)
     autoSaveTimer = setTimeout(() => {
+      // Guard against firing after component unmount or edit mode exit
+      if (disposed || !editing()) return
       void saveFile({ silent: true })
     }, 1000)
   })
-  onCleanup(() => clearTimeout(autoSaveTimer))
+  onCleanup(() => {
+    disposed = true
+    clearTimeout(autoSaveTimer)
+  })
 
   type FileMode = "comment" | "edit"
   const modeOptions: FileMode[] = ["comment", "edit"]
