@@ -66,9 +66,17 @@ struct InitState {
 }
 
 #[derive(Clone)]
+struct SidecarConfig {
+    hostname: String,
+    port: u32,
+    password: String,
+}
+
+#[derive(Clone)]
 struct ServerState {
     child: Arc<Mutex<Option<CommandChild>>>,
     status: future::Shared<oneshot::Receiver<Result<ServerReadyData, String>>>,
+    sidecar_config: Arc<Mutex<Option<SidecarConfig>>>,
 }
 
 impl ServerState {
@@ -79,11 +87,16 @@ impl ServerState {
         Self {
             child: Arc::new(Mutex::new(child)),
             status,
+            sidecar_config: Arc::new(Mutex::new(None)),
         }
     }
 
     pub fn set_child(&self, child: Option<CommandChild>) {
         *self.child.lock().unwrap() = child;
+    }
+
+    pub fn set_sidecar_config(&self, config: SidecarConfig) {
+        *self.sidecar_config.lock().unwrap() = Some(config);
     }
 }
 
@@ -94,6 +107,9 @@ fn kill_sidecar(app: AppHandle) {
         tracing::info!("Server not running");
         return;
     };
+
+    // Clear sidecar config to prevent watchdog from restarting
+    server_state.sidecar_config.lock().unwrap().take();
 
     let Some(server_state) = server_state
         .child
@@ -494,6 +510,8 @@ async fn initialize(app: AppHandle) {
                     child,
                     health_check,
                     url,
+                    hostname,
+                    port,
                     username,
                     password,
                 } => {
@@ -519,7 +537,16 @@ async fn initialize(app: AppHandle) {
 
                             tracing::info!("CLI health check OK");
 
-                            app.state::<ServerState>().set_child(Some(child));
+                            let state = app.state::<ServerState>();
+                            state.set_child(Some(child));
+                            state.set_sidecar_config(SidecarConfig {
+                                hostname,
+                                port,
+                                password: password.clone().unwrap_or_default(),
+                            });
+
+                            // Spawn watchdog to auto-restart sidecar if it dies
+                            tokio::spawn(sidecar_watchdog(app.clone()));
 
                             Ok(ServerReadyData {
                                 url,
@@ -616,11 +643,85 @@ enum ServerConnection {
     },
     CLI {
         url: String,
+        hostname: String,
+        port: u32,
         username: Option<String>,
         password: Option<String>,
         child: CommandChild,
         health_check: server::HealthCheck,
     },
+}
+
+/// Monitors the sidecar process and auto-restarts it if it dies.
+/// This prevents the app from going to a grey/blank screen when the
+/// sidecar crashes or is killed by the OS after prolonged idle.
+async fn sidecar_watchdog(app: AppHandle) {
+    const POLL_INTERVAL: Duration = Duration::from_secs(10);
+    const FAILURE_THRESHOLD: u32 = 3;
+
+    // Let the sidecar stabilize before starting health monitoring
+    sleep(Duration::from_secs(30)).await;
+
+    let mut consecutive_failures: u32 = 0;
+
+    loop {
+        sleep(POLL_INTERVAL).await;
+
+        let state = app.state::<ServerState>();
+        let config = state.sidecar_config.lock().unwrap().clone();
+        let Some(config) = config else {
+            // Config was cleared (intentional kill for update/restart), stop watchdog
+            tracing::info!("Sidecar watchdog stopping: config cleared");
+            return;
+        };
+
+        let url = format!("http://{}:{}", config.hostname, config.port);
+        let healthy = server::check_health(&url, Some(&config.password)).await;
+
+        if healthy {
+            consecutive_failures = 0;
+            continue;
+        }
+
+        consecutive_failures += 1;
+        tracing::warn!(consecutive_failures, "Sidecar health check failed");
+
+        if consecutive_failures >= FAILURE_THRESHOLD {
+            tracing::info!("Sidecar appears dead after {} consecutive failures, attempting restart", FAILURE_THRESHOLD);
+
+            // Kill old process if still around
+            if let Some(old_child) = state.child.lock().unwrap().take() {
+                let _ = old_child.kill();
+            }
+
+            // Check if config was intentionally cleared during our work
+            if state.sidecar_config.lock().unwrap().is_none() {
+                tracing::info!("Sidecar watchdog stopping: config cleared during restart");
+                return;
+            }
+
+            // Respawn sidecar with the same credentials so the frontend reconnects seamlessly
+            let (child, health_check) = server::spawn_local_server(
+                app.clone(),
+                config.hostname.clone(),
+                config.port,
+                config.password.clone(),
+            );
+
+            match timeout(Duration::from_secs(30), health_check.0).await {
+                Ok(Ok(Ok(()))) => {
+                    tracing::info!("Sidecar restarted successfully");
+                    state.set_child(Some(child));
+                    consecutive_failures = 0;
+                }
+                err => {
+                    tracing::error!(?err, "Failed to restart sidecar, will retry");
+                    let _ = child.kill();
+                    consecutive_failures = 0;
+                }
+            }
+        }
+    }
 }
 
 async fn setup_server_connection(app: AppHandle) -> ServerConnection {
@@ -657,6 +758,8 @@ async fn setup_server_connection(app: AppHandle) -> ServerConnection {
 
     ServerConnection::CLI {
         url: local_url,
+        hostname: hostname.to_string(),
+        port: local_port,
         username: Some("opencode".to_string()),
         password: Some(password),
         child,
