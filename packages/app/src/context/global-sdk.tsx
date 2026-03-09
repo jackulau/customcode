@@ -44,7 +44,9 @@ export const { use: useGlobalSDK, provider: GlobalSDKProvider } = createSimpleCo
     type Queued = { directory: string; payload: Event }
     const FLUSH_FRAME_MS = 16
     const STREAM_YIELD_MS = 8
-    const RECONNECT_DELAY_MS = 250
+    const RECONNECT_INITIAL_MS = 250
+    const RECONNECT_MAX_MS = 30_000
+    let reconnectDelay = RECONNECT_INITIAL_MS
 
     let queue: Queued[] = []
     let buffer: Queued[] = []
@@ -142,6 +144,7 @@ export const { use: useGlobalSDK, provider: GlobalSDKProvider } = createSimpleCo
             },
           })
           let yielded = Date.now()
+          reconnectDelay = RECONNECT_INITIAL_MS
           resetHeartbeat()
           for await (const event of events.stream) {
             resetHeartbeat()
@@ -184,7 +187,8 @@ export const { use: useGlobalSDK, provider: GlobalSDKProvider } = createSimpleCo
         }
 
         if (abort.signal.aborted) return
-        await wait(RECONNECT_DELAY_MS)
+        await wait(reconnectDelay)
+        reconnectDelay = Math.min(reconnectDelay * 2, RECONNECT_MAX_MS)
       }
     })().finally(flush)
 

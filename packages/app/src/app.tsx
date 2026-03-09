@@ -8,7 +8,7 @@ import { Font } from "@opencode-ai/ui/font"
 import { ThemeProvider } from "@opencode-ai/ui/theme"
 import { MetaProvider } from "@solidjs/meta"
 import { Navigate, Route, Router } from "@solidjs/router"
-import { ErrorBoundary, type JSX, lazy, type ParentProps, Show, Suspense } from "solid-js"
+import { createEffect, createSignal, ErrorBoundary, type JSX, lazy, onCleanup, type ParentProps, Show, Suspense } from "solid-js"
 import { CommandProvider } from "@/context/command"
 import { CommentsProvider } from "@/context/comments"
 import { FileProvider } from "@/context/file"
@@ -140,6 +140,48 @@ function ServerKey(props: ParentProps) {
   )
 }
 
+function ReconnectOverlay() {
+  const server = useServer()
+  const platform = usePlatform()
+  const [visible, setVisible] = createSignal(false)
+  const [canRestart, setCanRestart] = createSignal(false)
+
+  createEffect(() => {
+    const isHealthy = server.healthy()
+    if (isHealthy === false) {
+      const showTimer = setTimeout(() => setVisible(true), 5_000)
+      const restartTimer = setTimeout(() => setCanRestart(true), 35_000)
+      onCleanup(() => {
+        clearTimeout(showTimer)
+        clearTimeout(restartTimer)
+      })
+    } else {
+      setVisible(false)
+      setCanRestart(false)
+    }
+  })
+
+  return (
+    <Show when={visible()}>
+      <div class="fixed inset-0 z-50 flex items-center justify-center bg-background-base/80 backdrop-blur-sm">
+        <div class="flex flex-col items-center gap-4">
+          <div class="w-5 h-5 rounded-full border-2 border-text-weak/50 border-t-text-weak animate-spin" />
+          <p class="text-sm text-text-weak">Reconnecting to server…</p>
+          <Show when={canRestart() && platform.restart}>
+            <button
+              type="button"
+              class="mt-2 text-xs text-text-interactive-base hover:underline"
+              onClick={() => platform.restart!()}
+            >
+              Restart app
+            </button>
+          </Show>
+        </div>
+      </div>
+    </Show>
+  )
+}
+
 export function AppInterface(props: {
   children?: JSX.Element
   defaultServer: ServerConnection.Key
@@ -162,6 +204,7 @@ export function AppInterface(props: {
           </GlobalSyncProvider>
         </GlobalSDKProvider>
       </ServerKey>
+      <ReconnectOverlay />
     </ServerProvider>
   )
 }
